@@ -1,0 +1,5 @@
+# dns-server-roleplay/coredns/corefile
+.:53 {
+    game
+    forward . 8.8.8.8
+}

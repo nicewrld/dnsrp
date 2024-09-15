@@ -1,0 +1,23 @@
+<!-- dns-server-roleplay/webapp/templates/leaderboard.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Leaderboard - DNS Server Roleplay</title>
+</head>
+<body>
+    <h1>Leaderboard</h1>
+    <table>
+        <tr>
+            <th>Player ID</th>
+            <th>Score</th>
+        </tr>
+        {{range .}}
+        <tr>
+            <td>{{.PlayerID}}</td>
+            <td>{{.Score}}</td>
+        </tr>
+        {{end}}
+    </table>
+    <a href="/">Back to Game</a>
+</body>
+</html>
