@@ -1,0 +1,33 @@
+<!-- templates/leaderboard.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Leaderboard</title>
+    <!-- Include Bootstrap and other styles/scripts as before -->
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center">Leaderboard</h1>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Player</th>
+                    <th>Pure Points</th>
+                    <th>Evil Points</th>
+                    <th>Net Alignment</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range . }}
+                <tr>
+                    <td>{{ .Nickname }}</td>
+                    <td>{{ .PurePoints }}</td>
+                    <td>{{ .EvilPoints }}</td>
+                    <td>{{ .NetAlignment }}</td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

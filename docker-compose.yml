@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  coredns:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5983:5983/udp"
+    volumes:
+      - ./Corefile:/root/Corefile
+    depends_on:
+      - gameserver
+    networks:
+      - dnsgame-net
+
+  gameserver:
+    build:
+      context: ./gameserver
+    ports:
+      - "8080:8080"
+    networks:
+      - dnsgame-net
+
+  webinterface:
+    build:
+      context: ./webinterface
+    ports:
+      - "8081:8081"
+    depends_on:
+      - gameserver
+    networks:
+      - dnsgame-net
+
+networks:
+  dnsgame-net:
+    driver: bridge
