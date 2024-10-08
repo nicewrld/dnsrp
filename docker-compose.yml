@@ -32,6 +32,25 @@ services:
     networks:
       - dnsgame-net
 
+  stresstest:
+    build:
+      context: ./stresstest
+    image: stresstest
+    depends_on:
+      - webinterface
+      - gameserver
+      - coredns
+    environment:
+      NUM_PLAYERS: 1000
+      MAX_WORKERS: 150
+      NUM_THREADS: 150
+      DNS_SERVER: coredns
+      DNS_PORT: 5983
+      WEB_INTERFACE_HOST: webinterface:8081
+      STARTUP_DELAY: 10
+    networks:
+      - dnsgame-net
+
 networks:
   dnsgame-net:
     driver: bridge

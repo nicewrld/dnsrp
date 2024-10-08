@@ -29,10 +29,11 @@ type Player struct {
 
 var (
 	dnsRequests    = make(map[string]*DNSRequest) // Map of request ID to DNSRequest
-	dnsQueue       = make(chan *DNSRequest, 100)
-	pendingActions = sync.Map{}               // Map of request ID to action channel
-	players        = make(map[string]*Player) // Map of player ID to Player
-	mu             = sync.Mutex{}             // Mutex to protect dnsRequests and players
+	dnsQueue       []*DNSRequest                  // Slice to hold DNS requests
+	dnsQueueMu     sync.Mutex                     // Mutex to protect dnsQueue
+	pendingActions sync.Map                       // Map of request ID to action channel
+	players        = make(map[string]*Player)     // Map of player ID to Player
+	mu             sync.Mutex                     // Mutex to protect dnsRequests and players
 )
 
 type DNSResponse struct {
@@ -54,10 +55,12 @@ func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 
 	mu.Lock()
 	dnsRequests[dnsReq.RequestID] = &dnsReq
-	pendingActions.Store(dnsReq.RequestID, actionChan)
 	mu.Unlock()
+	pendingActions.Store(dnsReq.RequestID, actionChan)
 
-	dnsQueue <- &dnsReq
+	dnsQueueMu.Lock()
+	dnsQueue = append(dnsQueue, &dnsReq)
+	dnsQueueMu.Unlock()
 
 	log.Printf("Received DNS request: %v", dnsReq)
 	log.Printf("dnsQueue length: %d", len(dnsQueue))
@@ -78,6 +81,17 @@ func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Clean up
 	mu.Lock()
+	if !dnsReq.Assigned {
+		// Remove from dnsQueue
+		dnsQueueMu.Lock()
+		for i, req := range dnsQueue {
+			if req.RequestID == dnsReq.RequestID {
+				dnsQueue = append(dnsQueue[:i], dnsQueue[i+1:]...)
+				break
+			}
+		}
+		dnsQueueMu.Unlock()
+	}
 	delete(dnsRequests, dnsReq.RequestID)
 	mu.Unlock()
 	pendingActions.Delete(dnsReq.RequestID)
@@ -101,41 +115,42 @@ func assignDNSRequestHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if the player already has an assigned request
-	for _, req := range dnsRequests {
-		if req.Assigned && player.ID == req.RequestID {
-			log.Printf("Player %s already assigned request %s", playerID, req.RequestID)
-			json.NewEncoder(w).Encode(req)
+	if player.ID != "" {
+		dnsReq, exists := dnsRequests[player.ID]
+		if exists && dnsReq.Assigned {
+			log.Printf("Player %s already assigned request %s", playerID, dnsReq.RequestID)
+			json.NewEncoder(w).Encode(dnsReq)
 			return
 		}
 	}
 
 	// Assign a new request from the queue
-	select {
-	case dnsReq := <-dnsQueue:
+	dnsQueueMu.Lock()
+	defer dnsQueueMu.Unlock()
+
+	for len(dnsQueue) > 0 {
+		dnsReq := dnsQueue[0]
+		dnsQueue = dnsQueue[1:] // Remove from queue
+
+		if dnsReq.Assigned {
+			// Skip already assigned requests
+			continue
+		}
+
 		dnsReq.Assigned = true
 		player.ID = dnsReq.RequestID
 		log.Printf("Assigned request %s to player %s", dnsReq.RequestID, playerID)
 		json.NewEncoder(w).Encode(dnsReq)
-	default:
-		// No DNS requests available
-		log.Printf("No DNS requests available for player %s", playerID)
-		http.Error(w, "No DNS requests available", http.StatusNoContent)
+		return
 	}
+
+	// No DNS requests available
+	log.Printf("No DNS requests available for player %s", playerID)
+	http.Error(w, "No DNS requests available", http.StatusNoContent)
 }
 
 func generateRequestID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
-
-// Handler for players to get DNS requests
-func getDNSRequestHandler(w http.ResponseWriter, r *http.Request) {
-	select {
-	case dnsReq := <-dnsQueue:
-		json.NewEncoder(w).Encode(dnsReq)
-	default:
-		// No DNS requests available
-		http.Error(w, "No DNS requests available", http.StatusNoContent)
-	}
 }
 
 // Handler for players to submit actions
@@ -249,7 +264,6 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/dnsrequest", dnsRequestHandler)
-	http.HandleFunc("/getdnsrequest", getDNSRequestHandler)
 	http.HandleFunc("/submitaction", submitActionHandler)
 	http.HandleFunc("/register", registerHandler)
 	http.HandleFunc("/assign", assignDNSRequestHandler) // Add this line

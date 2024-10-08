@@ -1,6 +1,7 @@
 .:5983 {
     dnsrp http://gameserver:8080
     forward . 8.8.8.8
+    prometheus
     log
     errors
 }
