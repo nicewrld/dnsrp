@@ -41,9 +41,9 @@ services:
       - gameserver
       - coredns
     environment:
-      NUM_PLAYERS: 1000
-      MAX_WORKERS: 150
-      NUM_THREADS: 150
+      NUM_PLAYERS: 500
+      MAX_WORKERS: 500
+      NUM_THREADS: 500
       DNS_SERVER: coredns
       DNS_PORT: 5983
       WEB_INTERFACE_HOST: webinterface:8081

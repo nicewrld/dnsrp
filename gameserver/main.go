@@ -3,15 +3,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 )
 
+// DNSRequest represents a DNS query received by the gameserver
 type DNSRequest struct {
 	RequestID string `json:"request_id"`
 	Name      string `json:"name"`
@@ -20,26 +25,37 @@ type DNSRequest struct {
 	Assigned  bool   `json:"assigned"`
 }
 
+// Player represents a player in the game
 type Player struct {
-	ID         string
-	Nickname   string
-	PurePoints float64
-	EvilPoints float64
+	ID                string
+	Nickname          string
+	PurePoints        float64
+	EvilPoints        float64
+	AssignedRequestID string // Field to track assigned DNS request
 }
 
 var (
 	dnsRequests    = make(map[string]*DNSRequest) // Map of request ID to DNSRequest
-	dnsQueue       []*DNSRequest                  // Slice to hold DNS requests
-	dnsQueueMu     sync.Mutex                     // Mutex to protect dnsQueue
-	pendingActions sync.Map                       // Map of request ID to action channel
 	players        = make(map[string]*Player)     // Map of player ID to Player
-	mu             sync.Mutex                     // Mutex to protect dnsRequests and players
+	pendingActions sync.Map                       // Map of request ID to action channel
+
+	dnsRequestsMu sync.RWMutex // Read-Write Mutex for dnsRequests
+	playersMu     sync.RWMutex // Read-Write Mutex for players
+
+	dnsRequestChan = make(chan *DNSRequest, 10000) // Buffered channel for DNS requests
 )
 
+const (
+	MaxDNSQueueSize = 10000 // Maximum number of DNS requests in the queue
+	WorkerPoolSize  = 100   // Number of worker goroutines
+)
+
+// DNSResponse represents the response sent back to the CoreDNS plugin
 type DNSResponse struct {
 	Action string `json:"action"`
 }
 
+// dnsRequestHandler handles incoming DNS requests from CoreDNS
 func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 	var dnsReq DNSRequest
 	err := json.NewDecoder(r.Body).Decode(&dnsReq)
@@ -48,22 +64,36 @@ func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate a unique RequestID and mark as unassigned
 	dnsReq.RequestID = generateRequestID()
 	dnsReq.Assigned = false
 
-	actionChan := make(chan string)
+	// Create a channel to receive the action
+	actionChan := make(chan string, 1) // Buffered to prevent blocking
 
-	mu.Lock()
+	// Add the DNS request to the map
+	dnsRequestsMu.Lock()
 	dnsRequests[dnsReq.RequestID] = &dnsReq
-	mu.Unlock()
+	dnsRequestsMu.Unlock()
+
+	// Store the action channel for later use
 	pendingActions.Store(dnsReq.RequestID, actionChan)
 
-	dnsQueueMu.Lock()
-	dnsQueue = append(dnsQueue, &dnsReq)
-	dnsQueueMu.Unlock()
-
-	log.Printf("Received DNS request: %v", dnsReq)
-	log.Printf("dnsQueue length: %d", len(dnsQueue))
+	// Enqueue the DNS request
+	select {
+	case dnsRequestChan <- &dnsReq:
+		log.Printf("[RequestID: %s] Received DNS request: %v", dnsReq.RequestID, dnsReq)
+	default:
+		// Queue is full
+		log.Printf("[RequestID: %s] DNS request queue is full. Rejecting request: %v", dnsReq.RequestID, dnsReq)
+		http.Error(w, "Server busy. Try again later.", http.StatusServiceUnavailable)
+		// Clean up
+		dnsRequestsMu.Lock()
+		delete(dnsRequests, dnsReq.RequestID)
+		dnsRequestsMu.Unlock()
+		pendingActions.Delete(dnsReq.RequestID)
+		return
+	}
 
 	// Wait for the player's action or timeout
 	var action string
@@ -80,23 +110,15 @@ func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(dnsResp)
 
 	// Clean up
-	mu.Lock()
+	dnsRequestsMu.Lock()
 	if !dnsReq.Assigned {
-		// Remove from dnsQueue
-		dnsQueueMu.Lock()
-		for i, req := range dnsQueue {
-			if req.RequestID == dnsReq.RequestID {
-				dnsQueue = append(dnsQueue[:i], dnsQueue[i+1:]...)
-				break
-			}
-		}
-		dnsQueueMu.Unlock()
+		delete(dnsRequests, dnsReq.RequestID)
 	}
-	delete(dnsRequests, dnsReq.RequestID)
-	mu.Unlock()
+	dnsRequestsMu.Unlock()
 	pendingActions.Delete(dnsReq.RequestID)
 }
 
+// assignDNSRequestHandler assigns DNS requests to players
 func assignDNSRequestHandler(w http.ResponseWriter, r *http.Request) {
 	playerID := r.URL.Query().Get("player_id")
 	if playerID == "" {
@@ -104,56 +126,62 @@ func assignDNSRequestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Ensure the player exists in the players map
+	playersMu.Lock()
 	player, exists := players[playerID]
 	if !exists {
-		players[playerID] = &Player{}
-		player = players[playerID]
+		playersMu.Unlock()
+		http.Error(w, "Invalid player_id", http.StatusBadRequest)
+		return
 	}
 
 	// Check if the player already has an assigned request
-	if player.ID != "" {
-		dnsReq, exists := dnsRequests[player.ID]
+	if player.AssignedRequestID != "" {
+		dnsRequestsMu.RLock()
+		dnsReq, exists := dnsRequests[player.AssignedRequestID]
+		dnsRequestsMu.RUnlock()
 		if exists && dnsReq.Assigned {
-			log.Printf("Player %s already assigned request %s", playerID, dnsReq.RequestID)
+			log.Printf("[PlayerID: %s] Already assigned request %s", playerID, dnsReq.RequestID)
 			json.NewEncoder(w).Encode(dnsReq)
+			playersMu.Unlock()
 			return
 		}
 	}
 
+	playersMu.Unlock()
+
 	// Assign a new request from the queue
-	dnsQueueMu.Lock()
-	defer dnsQueueMu.Unlock()
-
-	for len(dnsQueue) > 0 {
-		dnsReq := dnsQueue[0]
-		dnsQueue = dnsQueue[1:] // Remove from queue
-
-		if dnsReq.Assigned {
-			// Skip already assigned requests
-			continue
+	select {
+	case dnsReq := <-dnsRequestChan:
+		playersMu.Lock()
+		player, exists := players[playerID]
+		if !exists {
+			// Player might have been deleted
+			playersMu.Unlock()
+			http.Error(w, "Invalid player_id", http.StatusBadRequest)
+			return
 		}
 
+		// Assign the request
 		dnsReq.Assigned = true
-		player.ID = dnsReq.RequestID
-		log.Printf("Assigned request %s to player %s", dnsReq.RequestID, playerID)
+		player.AssignedRequestID = dnsReq.RequestID
+		log.Printf("[PlayerID: %s] Assigned request %s", playerID, dnsReq.RequestID)
+
 		json.NewEncoder(w).Encode(dnsReq)
+		playersMu.Unlock()
+	default:
+		// No DNS requests available
+		log.Printf("[PlayerID: %s] No DNS requests available", playerID)
+		http.Error(w, "No DNS requests available", http.StatusNoContent)
 		return
 	}
-
-	// No DNS requests available
-	log.Printf("No DNS requests available for player %s", playerID)
-	http.Error(w, "No DNS requests available", http.StatusNoContent)
 }
 
+// generateRequestID creates a unique RequestID based on the current timestamp
 func generateRequestID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	return fmt.Sprintf("req-%d", time.Now().UnixNano())
 }
 
-// Handler for players to submit actions
+// submitActionHandler handles the actions submitted by players
 func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 	var actionReq struct {
 		PlayerID  string `json:"player_id"`
@@ -166,22 +194,33 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
+	// Validate player and request
+	playersMu.RLock()
 	player, exists := players[actionReq.PlayerID]
+	playersMu.RUnlock()
 	if !exists {
 		http.Error(w, "Invalid player ID", http.StatusBadRequest)
 		return
 	}
 
+	playersMu.RLock()
+	if player.AssignedRequestID != actionReq.RequestID {
+		playersMu.RUnlock()
+		http.Error(w, "Invalid request_id for this player", http.StatusBadRequest)
+		return
+	}
+	playersMu.RUnlock()
+
+	dnsRequestsMu.RLock()
 	dnsReq, exists := dnsRequests[actionReq.RequestID]
-	if !exists || dnsReq.Assigned == false || player.ID != dnsReq.RequestID {
+	dnsRequestsMu.RUnlock()
+	if !exists || !dnsReq.Assigned {
 		http.Error(w, "Invalid request or player", http.StatusBadRequest)
 		return
 	}
 
 	// Update player's score based on the action
+	playersMu.Lock()
 	switch actionReq.Action {
 	case "correct":
 		player.PurePoints += 1
@@ -189,22 +228,28 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 		player.EvilPoints += 1
 	default:
 		// Invalid action
+		playersMu.Unlock()
 		http.Error(w, "Invalid action", http.StatusBadRequest)
 		return
 	}
+	playersMu.Unlock()
 
+	// Notify the /dnsrequest handler
 	value, ok := pendingActions.Load(actionReq.RequestID)
-	if !ok {
-		http.Error(w, "Invalid request_id", http.StatusBadRequest)
-		return
+	if ok {
+		actionChan := value.(chan string)
+		actionChan <- actionReq.Action
 	}
 
-	actionChan := value.(chan string)
-	actionChan <- actionReq.Action
+	// Clear the player's assigned request
+	playersMu.Lock()
+	player.AssignedRequestID = ""
+	playersMu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
 }
 
+// leaderboardHandler returns the current leaderboard
 func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 	type LeaderboardEntry struct {
 		PlayerID     string  `json:"player_id"`
@@ -214,8 +259,8 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 		NetAlignment float64 `json:"net_alignment"`
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	playersMu.RLock()
+	defer playersMu.RUnlock()
 
 	var leaderboard []LeaderboardEntry
 	for _, player := range players {
@@ -228,7 +273,7 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Sort the leaderboard
+	// Sort the leaderboard by NetAlignment in descending order
 	sort.Slice(leaderboard, func(i, j int) bool {
 		return leaderboard[i].NetAlignment > leaderboard[j].NetAlignment
 	})
@@ -237,10 +282,12 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(leaderboard)
 }
 
+// generatePlayerID creates a unique PlayerID based on the current timestamp
 func generatePlayerID() string {
 	return fmt.Sprintf("player-%d", time.Now().UnixNano())
 }
 
+// registerHandler handles player registration
 func registerHandler(w http.ResponseWriter, r *http.Request) {
 	nickname := r.URL.Query().Get("nickname")
 	if nickname == "" {
@@ -249,25 +296,99 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	playerID := generatePlayerID()
-	mu.Lock()
+	playersMu.Lock()
 	players[playerID] = &Player{
 		ID:         playerID,
 		Nickname:   nickname,
 		PurePoints: 0,
 		EvilPoints: 0,
 	}
-	mu.Unlock()
+	playersMu.Unlock()
 
 	log.Printf("Registered player: %s (%s)", nickname, playerID)
 	w.Write([]byte(playerID))
 }
 
+// dnsRequestWorker processes DNS requests from the channel
+func dnsRequestWorker() {
+	for dnsReq := range dnsRequestChan {
+		assignDNSRequest(dnsReq)
+	}
+}
+
+// processDNSRequests initializes the worker pool
+func processDNSRequests() {
+	for i := 0; i < WorkerPoolSize; i++ {
+		go dnsRequestWorker()
+	}
+}
+
+// assignDNSRequest assigns a DNS request to an available player
+func assignDNSRequest(dnsReq *DNSRequest) {
+	playersMu.Lock()
+	defer playersMu.Unlock()
+
+	// Find an available player
+	for playerID, player := range players {
+		if player.AssignedRequestID == "" {
+			// Assign the request to this player
+			dnsReq.Assigned = true
+			player.AssignedRequestID = dnsReq.RequestID
+			log.Printf("[PlayerID: %s] Assigned request %s", playerID, dnsReq.RequestID)
+
+			// No need to notify here as /dnsrequest handler waits for action via /submitaction
+
+			break // Ensure only one player is assigned
+		}
+	}
+}
+
 func main() {
-	http.HandleFunc("/dnsrequest", dnsRequestHandler)
-	http.HandleFunc("/submitaction", submitActionHandler)
-	http.HandleFunc("/register", registerHandler)
-	http.HandleFunc("/assign", assignDNSRequestHandler) // Add this line
-	http.HandleFunc("/leaderboard", leaderboardHandler)
-	log.Println("Game server running on port 8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Handle graceful shutdown
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dnsrequest", dnsRequestHandler)
+	mux.HandleFunc("/submitaction", submitActionHandler)
+	mux.HandleFunc("/register", registerHandler)
+	mux.HandleFunc("/assign", assignDNSRequestHandler)
+	mux.HandleFunc("/leaderboard", leaderboardHandler)
+
+	// Start the DNS request workers
+	processDNSRequests()
+
+	server := &http.Server{
+		Addr:         ":8080",
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,  // Maximum duration for reading the entire request, including the body
+		WriteTimeout: 35 * time.Second, // Maximum duration before timing out writes of the response
+		IdleTimeout:  60 * time.Second, // Maximum amount of time to wait for the next request when keep-alives are enabled
+	}
+
+	// Channel to listen for errors
+	serverErrors := make(chan error, 1)
+
+	// Start the server
+	go func() {
+		log.Println("Game server running on port 8080")
+		serverErrors <- server.ListenAndServe()
+	}()
+
+	// Graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErrors:
+		log.Fatalf("Could not start server: %v", err)
+	case sig := <-sigChan:
+		log.Printf("Received signal %v. Shutting down...", sig)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := server.Shutdown(ctx); err != nil {
+			log.Fatalf("Could not gracefully shutdown the server: %v", err)
+		}
+
+		close(dnsRequestChan) // Close the DNS request channel to stop workers
+	}
 }
