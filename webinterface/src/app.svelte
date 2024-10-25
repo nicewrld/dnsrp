@@ -1,35 +1,149 @@
-<!-- frontend/src/App.svelte -->
 <script>
-    import Router, { link } from 'svelte-spa-router';
-    import Play from './components/play.svelte';
-    import Leaderboard from './components/leaderboard.svelte';
-    import Register from './components/register.svelte';
-  
-    const routes = {
-      '/': Play,
-      '/play': Play,
-      '/leaderboard': Leaderboard,
-      '/register': Register,
-    };
-  </script>
-  
-  <nav class="bg-gray-800">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex items-center justify-between h-16">
-        <div class="flex items-center">
-          <a href="/play" use:link class="text-white text-xl font-bold">DNS Roleplay Game</a>
-        </div>
-        <div class="block">
-          <div class="ml-4 flex items-center">
-            <a href="/play" use:link class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Play</a>
-            <a href="/leaderboard" use:link class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium">Leaderboard</a>
-          </div>
-        </div>
+  import Router from 'svelte-spa-router';
+  import { link, location } from 'svelte-spa-router';
+  import Play from './components/play.svelte';
+  import Leaderboard from './components/leaderboard.svelte';
+  import Register from './components/register.svelte';
+  import { PlayIcon, TrophyIcon } from 'lucide-svelte';
+
+  const routes = {
+    '/': Play,
+    '/play': Play,
+    '/leaderboard': Leaderboard,
+    '/register': Register,
+  };
+</script>
+
+<div class="app-container">
+  <nav class="sidebar">
+    <div class="sidebar-content">
+      <a href="/" use:link class="sidebar-brand">dnsrp</a>
+      <div class="sidebar-tabs" role="tablist">
+        <a href="/play" use:link class="sidebar-tab" class:active={$location === '/play' || $location === '/'} role="tab">
+          <PlayIcon size={24} />
+          <span class="sidebar-tab-text">Play</span>
+        </a>
+        <a href="/leaderboard" use:link class="sidebar-tab" class:active={$location === '/leaderboard'} role="tab">
+          <TrophyIcon size={24} />
+          <span class="sidebar-tab-text">Leaderboard</span>
+        </a>
       </div>
     </div>
   </nav>
-  
-  <main class="py-6">
+
+  <main class="main-content">
     <Router {routes} />
   </main>
-  
+</div>
+
+<style>
+  :global(body) {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f5f7fa;
+    color: #333;
+  }
+
+  .app-container {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    background: var(--sidebar-bg, #2c3e50);
+    width: calc(var(--sidebar-width, 100px) + var(--sidebar-inner-padding, 16px) * 2);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+
+  .sidebar-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: var(--sidebar-inner-padding, 16px);
+  }
+
+  .sidebar-brand {
+    color: var(--sidebar-highlight, #ecf0f1);
+    font-size: 1.5rem;
+    font-weight: bold;
+    text-decoration: none;
+    margin-bottom: 2rem;
+    text-align: center;
+  }
+
+  .sidebar-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--padding, 8px);
+  }
+
+  .sidebar-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 3px;
+    padding: var(--padding, 8px) 3px;
+    color: var(--sidebar-highlight, #ecf0f1);
+    font-size: var(--sidebar-font-size, 14px);
+    opacity: 0.75;
+    text-decoration: none;
+    border-radius: var(--border-radius, 8px);
+    transition: background-color 0.2s, opacity 0.2s;
+  }
+
+  .sidebar-tab:hover, .sidebar-tab.active {
+    background-color: var(--sidebar-hover, #34495e);
+    opacity: 1;
+  }
+
+  .sidebar-tab.active {
+    color: var(--sidebar-bg, #2c3e50);
+    background: var(--sidebar-highlight, #ecf0f1);
+  }
+
+  .main-content {
+    flex: 1;
+    padding: 2rem;
+    overflow-y: auto;
+  }
+
+  @media (max-width: 768px) {
+    .app-container {
+      flex-direction: column;
+    }
+
+    .sidebar {
+      width: 100%;
+      height: auto;
+      position: static;
+    }
+
+    .sidebar-content {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--sidebar-inner-padding, 16px);
+    }
+
+    .sidebar-brand {
+      margin-bottom: 0;
+    }
+
+    .sidebar-tabs {
+      flex-direction: row;
+    }
+
+    .sidebar-tab {
+      flex-direction: row;
+      padding: 5px var(--padding, 8px);
+    }
+
+    .main-content {
+      padding: 1rem;
+    }
+  }
+</style>
