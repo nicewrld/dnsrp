@@ -1,13 +1,14 @@
+// webinterface/main.go
 package main
 
 import (
 	"bytes"
 	"encoding/json"
-	"html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -25,33 +26,12 @@ type DNSResponse struct {
 // Global variables
 var (
 	client *http.Client
-
-	playTemplate        *template.Template
-	leaderboardTemplate *template.Template
-	registerTemplate    *template.Template
 )
 
 func init() {
 	// Create an HTTP client with timeouts
 	client = &http.Client{
 		Timeout: 10 * time.Second,
-	}
-
-	// Parse templates once at startup
-	var err error
-	playTemplate, err = template.ParseFiles("templates/play.html")
-	if err != nil {
-		log.Fatalf("Failed to parse play.html: %v", err)
-	}
-
-	leaderboardTemplate, err = template.ParseFiles("templates/leaderboard.html")
-	if err != nil {
-		log.Fatalf("Failed to parse leaderboard.html: %v", err)
-	}
-
-	registerTemplate, err = template.ParseFiles("templates/register.html")
-	if err != nil {
-		log.Fatalf("Failed to parse register.html: %v", err)
 	}
 }
 
@@ -74,9 +54,23 @@ func playHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNoContent {
+		log.Printf("No DNS requests available for player %s", playerID)
+		http.Error(w, "No DNS requests available.", http.StatusNoContent)
+		return
+	}
+
+	if resp.StatusCode == http.StatusBadRequest {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyString := string(bodyBytes)
+		log.Printf("Failed to get DNS request: %s", bodyString)
+		http.Error(w, bodyString, http.StatusBadRequest)
+		return
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Failed to get assigned DNS request: status code %d", resp.StatusCode)
-		http.Error(w, "No DNS requests available. Please try again later.", http.StatusServiceUnavailable)
+		http.Error(w, "Failed to get DNS request.", http.StatusInternalServerError)
 		return
 	}
 
@@ -88,13 +82,9 @@ func playHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = playTemplate.Execute(w, dnsReq)
-	if err != nil {
-		log.Printf("Error executing template: %v", err)
-		http.Error(w, "Failed to render template.", http.StatusInternalServerError)
-		return
-	}
-
+	// Return DNS request as JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(dnsReq)
 }
 
 func submitHandler(w http.ResponseWriter, r *http.Request) {
@@ -105,21 +95,15 @@ func submitHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := r.ParseForm()
+	var actionReq map[string]string
+	err := json.NewDecoder(r.Body).Decode(&actionReq)
 	if err != nil {
-		log.Printf("Failed to parse form: %v", err)
-		http.Error(w, "Invalid form data.", http.StatusBadRequest)
+		log.Printf("Failed to parse request body: %v", err)
+		http.Error(w, "Invalid request data.", http.StatusBadRequest)
 		return
 	}
 
-	action := r.FormValue("action")
-	requestID := r.FormValue("request_id")
-
-	actionReq := map[string]string{
-		"player_id":  playerID,
-		"request_id": requestID,
-		"action":     action,
-	}
+	actionReq["player_id"] = playerID
 
 	data, _ := json.Marshal(actionReq)
 	resp, err := client.Post("http://gameserver:8080/submitaction", "application/json", bytes.NewBuffer(data))
@@ -131,12 +115,15 @@ func submitHandler(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Failed to submit action: status code %d", resp.StatusCode)
-		http.Error(w, "Failed to submit action.", http.StatusInternalServerError)
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyString := string(bodyBytes)
+		log.Printf("Failed to submit action: status code %d, response: %s", resp.StatusCode, bodyString)
+		http.Error(w, bodyString, resp.StatusCode)
 		return
 	}
 
-	http.Redirect(w, r, "/play", http.StatusSeeOther)
+	// Return success response
+	w.WriteHeader(http.StatusOK)
 }
 
 func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
@@ -169,33 +156,24 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = leaderboardTemplate.Execute(w, leaderboard)
-	if err != nil {
-		log.Printf("Error executing template: %v", err)
-		http.Error(w, "Failed to render template.", http.StatusInternalServerError)
-		return
-	}
+	// Return leaderboard as JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(leaderboard)
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		// Display the registration form
-		err := registerTemplate.Execute(w, nil)
-		if err != nil {
-			log.Printf("Error executing template: %v", err)
-			http.Error(w, "Failed to render template.", http.StatusInternalServerError)
-			return
-		}
-	} else if r.Method == http.MethodPost {
+	if r.Method == http.MethodPost {
 		// Process the registration form
-		err := r.ParseForm()
+		var reqData map[string]string
+		err := json.NewDecoder(r.Body).Decode(&reqData)
 		if err != nil {
-			log.Printf("Failed to parse form: %v", err)
-			http.Error(w, "Invalid form data.", http.StatusBadRequest)
+			log.Printf("Failed to parse request body: %v", err)
+			http.Error(w, "Invalid request data.", http.StatusBadRequest)
 			return
 		}
 
-		nickname := r.FormValue("nickname")
+		nickname := reqData["nickname"]
+		log.Printf("Registering player with nickname: %s", nickname)
 
 		resp, err := client.Get("http://gameserver:8080/register?nickname=" + url.QueryEscape(nickname))
 		if err != nil {
@@ -213,14 +191,19 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 
 		data, _ := ioutil.ReadAll(resp.Body)
 		playerID := string(data)
+		log.Printf("Player registered with ID: %s", playerID)
 
+		// Set cookie
 		http.SetCookie(w, &http.Cookie{
 			Name:  "player_id",
 			Value: playerID,
 			Path:  "/",
 		})
 
-		http.Redirect(w, r, "/play", http.StatusSeeOther)
+		// Return success response
+		w.WriteHeader(http.StatusOK)
+	} else {
+		http.Error(w, "Method not allowed.", http.StatusMethodNotAllowed)
 	}
 }
 
@@ -230,16 +213,33 @@ func getPlayerID(w http.ResponseWriter, r *http.Request) string {
 		return cookie.Value
 	}
 
-	// Redirect to registration page
-	http.Redirect(w, r, "/register", http.StatusSeeOther)
+	// Return empty string and set status code
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	return ""
 }
 
 func main() {
-	http.HandleFunc("/play", playHandler)
-	http.HandleFunc("/submit", submitHandler)
-	http.HandleFunc("/leaderboard", leaderboardHandler)
-	http.HandleFunc("/register", registerHandler)
+	mux := http.NewServeMux()
+
+	// API endpoints
+	mux.HandleFunc("/api/play", playHandler)
+	mux.HandleFunc("/api/submit", submitHandler)
+	mux.HandleFunc("/api/leaderboard", leaderboardHandler)
+	mux.HandleFunc("/api/register", registerHandler)
+
+	// Serve static files
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// If the request is for an API endpoint, return 404
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Serve static files
+		fs := http.FileServer(http.Dir("public"))
+		fs.ServeHTTP(w, r)
+	})
+
 	log.Println("Web interface running on port 8081")
-	log.Fatal(http.ListenAndServe(":8081", nil))
+	log.Fatal(http.ListenAndServe(":8081", mux))
 }
