@@ -1,5 +1,6 @@
 <script>
-  import Router, { link, location } from 'svelte-spa-router';
+  import Router from 'svelte-spa-router';
+  import { link, location } from 'svelte-spa-router';
   import Play from './components/play.svelte';
   import Leaderboard from './components/leaderboard.svelte';
   import Register from './components/register.svelte';
@@ -16,11 +17,11 @@
   <nav class="sidebar">
     <div class="sidebar-content">
       <a href="/" use:link class="sidebar-brand">🎮 DNS RP</a>
-      <div class="sidebar-links">
-        <a href="/play" use:link class="sidebar-link" class:active={$location === '/play' || $location === '/'}>
+      <div class="sidebar-tabs" role="tablist">
+        <a href="/play" use:link class="sidebar-tab" class:active={$location === '/play' || $location === '/'} role="tab">
           🕹️ Play
         </a>
-        <a href="/leaderboard" use:link class="sidebar-link" class:active={$location === '/leaderboard'}>
+        <a href="/leaderboard" use:link class="sidebar-tab" class:active={$location === '/leaderboard'} role="tab">
           🏆 Leaderboard
         </a>
       </div>
@@ -47,19 +48,22 @@
   }
 
   .sidebar {
-    background-color: #2c3e50;
-    width: 200px;
-    padding: 1rem;
+    background: var(--sidebar-bg, #2c3e50);
+    width: calc(var(--sidebar-width, 200px) + var(--sidebar-inner-padding, 16px) * 2);
+    position: sticky;
+    top: 0;
+    height: 100vh;
   }
 
   .sidebar-content {
     display: flex;
     flex-direction: column;
     height: 100%;
+    padding: var(--sidebar-inner-padding, 16px);
   }
 
   .sidebar-brand {
-    color: #ecf0f1;
+    color: var(--sidebar-highlight, #ecf0f1);
     font-size: 1.5rem;
     font-weight: bold;
     text-decoration: none;
@@ -67,25 +71,35 @@
     text-align: center;
   }
 
-  .sidebar-links {
+  .sidebar-tabs {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--padding, 8px);
   }
 
-  .sidebar-link {
-    color: #ecf0f1;
-    text-decoration: none;
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
-    transition: background-color 0.3s;
+  .sidebar-tab {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 0.5rem;
+    text-align: center;
+    gap: 3px;
+    padding: var(--padding, 8px) 3px;
+    color: var(--sidebar-highlight, #ecf0f1);
+    font-size: var(--sidebar-font-size, 14px);
+    opacity: 0.75;
+    text-decoration: none;
+    border-radius: var(--border-radius, 8px);
+    transition: background-color 0.2s, opacity 0.2s;
   }
 
-  .sidebar-link:hover, .sidebar-link.active {
-    background-color: #34495e;
+  .sidebar-tab:hover, .sidebar-tab.active {
+    background-color: var(--sidebar-hover, #34495e);
+    opacity: 1;
+  }
+
+  .sidebar-tab.active {
+    color: var(--sidebar-bg, #2c3e50);
+    background: var(--sidebar-highlight, #ecf0f1);
   }
 
   .main-content {
@@ -101,22 +115,28 @@
 
     .sidebar {
       width: 100%;
-      padding: 1rem 0;
+      height: auto;
+      position: static;
     }
 
     .sidebar-content {
       flex-direction: row;
       justify-content: space-between;
       align-items: center;
-      padding: 0 1rem;
+      padding: var(--sidebar-inner-padding, 16px);
     }
 
     .sidebar-brand {
       margin-bottom: 0;
     }
 
-    .sidebar-links {
+    .sidebar-tabs {
       flex-direction: row;
+    }
+
+    .sidebar-tab {
+      flex-direction: row;
+      padding: 5px var(--padding, 8px);
     }
 
     .main-content {
