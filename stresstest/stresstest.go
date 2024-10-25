@@ -1,9 +1,10 @@
+// stresstest/stresstest.go
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"html"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
@@ -14,8 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/PuerkitoBio/goquery"
 )
 
 // Configuration variables
@@ -30,9 +29,16 @@ var (
 	domains          []string
 )
 
+type DNSRequest struct {
+	RequestID string `json:"request_id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Class     string `json:"class"`
+}
+
 // Initialize configuration from environment variables
 func initConfig() {
-	numPlayers, _ = strconv.Atoi(getEnv("NUM_PLAYERS", "500"))
+	numPlayers, _ = strconv.Atoi(getEnv("NUM_PLAYERS", "100")) // Adjusted number of players
 	maxWorkers, _ = strconv.Atoi(getEnv("MAX_WORKERS", "100"))
 	numThreads, _ = strconv.Atoi(getEnv("NUM_THREADS", "100"))
 	startupDelay, _ = strconv.Atoi(getEnv("STARTUP_DELAY", "30"))
@@ -124,7 +130,7 @@ func dnsWorker(dnsServerIP string, dnsPort string, wg *sync.WaitGroup) {
 		domain := domains[rand.Intn(len(domains))]
 		queryDomain(domain, dnsServerIP, dnsPort)
 		// Sleep for a random duration to add randomness
-		time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
+		time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond) // Reduced sleep time
 	}
 }
 
@@ -136,9 +142,6 @@ func simulatePlayer(playerNumber int, sem chan struct{}, wg *sync.WaitGroup) {
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
 	}
 
 	// Register the player once
@@ -157,13 +160,20 @@ func registerPlayer(client *http.Client, playerNumber int) (string, error) {
 	// Generate a random nickname
 	nickname := fmt.Sprintf("Player%d_%s", playerNumber, randomString(5))
 
-	// Prepare form data
-	data := fmt.Sprintf("nickname=%s", url.QueryEscape(nickname))
-	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/register", webInterfaceHost), strings.NewReader(data))
+	// Prepare JSON data
+	data := map[string]string{
+		"nickname": nickname,
+	}
+	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/api/register", webInterfaceHost), bytes.NewReader(jsonData))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
 
 	// Execute the request
 	resp, err := client.Do(req)
@@ -173,7 +183,7 @@ func registerPlayer(client *http.Client, playerNumber int) (string, error) {
 	defer resp.Body.Close()
 
 	// Check response status
-	if resp.StatusCode != http.StatusSeeOther && resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("registration failed with status code %d", resp.StatusCode)
 	}
 
@@ -208,7 +218,7 @@ func playGame(client *http.Client, playerID string, playerNumber int) {
 	for {
 		err := func() error {
 			// Get assigned DNS request
-			req, err := http.NewRequest("GET", fmt.Sprintf("http://%s/play", webInterfaceHost), nil)
+			req, err := http.NewRequest("GET", fmt.Sprintf("http://%s/api/play", webInterfaceHost), nil)
 			if err != nil {
 				return err
 			}
@@ -219,35 +229,53 @@ func playGame(client *http.Client, playerID string, playerNumber int) {
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode == http.StatusUnauthorized {
+				log.Printf("Player %d: Unauthorized. Re-registering...", playerNumber)
+				// Re-register the player
+				playerID, err = registerPlayer(client, playerNumber)
+				if err != nil {
+					return err
+				}
+				return nil
+			}
+
+			if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusServiceUnavailable {
 				log.Printf("Player %d: No DNS requests available. Waiting...", playerNumber)
 				time.Sleep(5 * time.Second)
 				return nil
 			}
 
-			body, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
-				return err
-			}
-
-			// Parse HTML to extract request_id
-			requestID, err := extractRequestID(string(body))
-			if err != nil {
-				log.Printf("Player %d: Failed to find request_id.", playerNumber)
+			if resp.StatusCode != http.StatusOK {
+				log.Printf("Player %d: Unexpected status code %d", playerNumber, resp.StatusCode)
 				time.Sleep(5 * time.Second)
 				return nil
+			}
+
+			var dnsReq DNSRequest
+			err = json.NewDecoder(resp.Body).Decode(&dnsReq)
+			if err != nil {
+				return err
 			}
 
 			// Randomly select an action
 			action := randomAction()
 
-			// Submit action
-			data := fmt.Sprintf("action=%s&request_id=%s", url.QueryEscape(action), url.QueryEscape(requestID))
-			submitReq, err := http.NewRequest("POST", fmt.Sprintf("http://%s/submit", webInterfaceHost), strings.NewReader(data))
+			// Prepare JSON data for submission
+			submitData := map[string]string{
+				"action":     action,
+				"request_id": dnsReq.RequestID,
+			}
+			jsonSubmitData, err := json.Marshal(submitData)
 			if err != nil {
 				return err
 			}
-			submitReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+			// Submit action
+			submitReq, err := http.NewRequest("POST", fmt.Sprintf("http://%s/api/submit", webInterfaceHost), bytes.NewReader(jsonSubmitData))
+			if err != nil {
+				return err
+			}
+			submitReq.Header.Set("Content-Type", "application/json")
 			// Cookie is managed by client.Jar
 			submitResp, err := client.Do(submitReq)
 			if err != nil {
@@ -255,8 +283,8 @@ func playGame(client *http.Client, playerID string, playerNumber int) {
 			}
 			defer submitResp.Body.Close()
 
-			if submitResp.StatusCode != http.StatusOK && submitResp.StatusCode != http.StatusSeeOther {
-				log.Printf("Player %d: Failed to submit action.", playerNumber)
+			if submitResp.StatusCode != http.StatusOK {
+				log.Printf("Player %d: Failed to submit action. Status code %d", playerNumber, submitResp.StatusCode)
 				time.Sleep(5 * time.Second)
 				return nil
 			}
@@ -269,7 +297,6 @@ func playGame(client *http.Client, playerID string, playerNumber int) {
 		if err != nil {
 			log.Printf("Player %d: Error during gameplay - %v", playerNumber, err)
 			time.Sleep(5 * time.Second)
-			// Optionally, you can choose to break the loop or continue
 			continue
 		}
 	}
@@ -321,19 +348,6 @@ func randomAction() string {
 		"nxdomain",
 	}
 	return actions[rand.Intn(len(actions))]
-}
-
-func extractRequestID(htmlContent string) (string, error) {
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
-	if err != nil {
-		return "", err
-	}
-
-	requestID, exists := doc.Find("input[name='request_id']").Attr("value")
-	if !exists {
-		return "", fmt.Errorf("request_id not found")
-	}
-	return html.UnescapeString(requestID), nil
 }
 
 // DNS message structures
