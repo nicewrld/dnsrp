@@ -4,7 +4,7 @@
   import Play from './components/play.svelte';
   import Leaderboard from './components/leaderboard.svelte';
   import Register from './components/register.svelte';
-  import { PlayIcon, TrophyIcon } from 'lucide-svelte';
+  import * as lucideSvelte from 'lucide-svelte';
 
   const routes = {
     '/': Play,
@@ -20,11 +20,11 @@
       <a href="/" use:link class="sidebar-brand">dnsrp</a>
       <div class="sidebar-tabs" role="tablist">
         <a href="/play" use:link class="sidebar-tab" class:active={$location === '/play' || $location === '/'} role="tab">
-          <PlayIcon size={24} />
+          <lucideSvelte.PlayIcon size={24} />
           <span class="sidebar-tab-text">Play</span>
         </a>
         <a href="/leaderboard" use:link class="sidebar-tab" class:active={$location === '/leaderboard'} role="tab">
-          <TrophyIcon size={24} />
+          <lucideSvelte.TrophyIcon size={24} />
           <span class="sidebar-tab-text">Leaderboard</span>
         </a>
       </div>
