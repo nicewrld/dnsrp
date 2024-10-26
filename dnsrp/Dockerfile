@@ -11,8 +11,8 @@ WORKDIR /app/coredns
 # plugin.cfg controls loading of plugins, we need to add our plugin to it
 ADD plugin.cfg /app/coredns/plugin.cfg
 # add our plugin to the plugin directory
-ADD dnsrp.go plugin/dnsrp
-ADD setup.go plugin/dnsrp
+ADD dnsrp.go /app/coredns/plugin/dnsrp/dnsrp.go
+ADD setup.go /app/coredns/plugin/dnsrp/setup.go
 
 
 
