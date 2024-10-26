@@ -42,6 +42,7 @@ var (
 		Name: "gameserver_player_actions_total",
 		Help: "Total number of actions by type",
 	}, []string{"action"})
+)
 
 // DNSRequest represents a DNS query received by the gameserver
 type DNSRequest struct {
