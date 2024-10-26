@@ -13,7 +13,35 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+var (
+	// Metrics
+	dnsRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "gameserver_dns_requests_total",
+		Help: "Total number of DNS requests received",
+	})
+	dnsRequestQueueSize = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "gameserver_dns_request_queue_size",
+		Help: "Current size of the DNS request queue",
+	})
+	dnsRequestLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "gameserver_dns_request_duration_seconds",
+		Help:    "DNS request latency in seconds",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"action"})
+	playerCount = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "gameserver_player_count",
+		Help: "Current number of registered players",
+	})
+	playerActionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "gameserver_player_actions_total",
+		Help: "Total number of actions by type",
+	}, []string{"action"})
 
 // DNSRequest represents a DNS query received by the gameserver
 type DNSRequest struct {
@@ -56,6 +84,8 @@ const (
 
 // dnsRequestHandler handles incoming DNS requests from CoreDNS
 func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	dnsRequestsTotal.Inc()
 	var dnsReq DNSRequest
 	err := json.NewDecoder(r.Body).Decode(&dnsReq)
 	if err != nil {
@@ -83,6 +113,7 @@ func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 	select {
 	case dnsRequestChan <- &dnsReq:
 		dnsQueueSize := len(dnsRequestChan)
+		dnsRequestQueueSize.Set(float64(dnsQueueSize))
 		log.Printf("[RequestID: %s] Received DNS request: %v. Queue size: %d", dnsReq.RequestID, dnsReq, dnsQueueSize)
 	default:
 		// Queue is full
@@ -109,6 +140,11 @@ func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 	// Send the action back to the DNS plugin
 	dnsResp := DNSResponse{Action: action}
 	json.NewEncoder(w).Encode(dnsResp)
+	
+	// Record request duration with action label
+	dnsRequestLatency.With(prometheus.Labels{
+		"action": action,
+	}).Observe(time.Since(start).Seconds())
 
 	// Clean up
 	dnsRequestsMu.Lock()
@@ -235,8 +271,10 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 	switch actionReq.Action {
 	case "correct":
 		player.PurePoints += 1
+		playerActionCounter.With(prometheus.Labels{"action": "correct"}).Inc()
 	case "corrupt", "delay", "nxdomain":
 		player.EvilPoints += 1
+		playerActionCounter.With(prometheus.Labels{"action": actionReq.Action}).Inc()
 	default:
 		playersMu.Unlock()
 		log.Printf("Invalid action submitted by player %s: %s", actionReq.PlayerID, actionReq.Action)
@@ -316,6 +354,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		PurePoints: 0,
 		EvilPoints: 0,
 	}
+	playerCount.Set(float64(len(players)))
 	playersMu.Unlock()
 
 	log.Printf("Registered player: %s (%s)", nickname, playerID)
@@ -341,6 +380,10 @@ func cleanupExpiredRequests() {
 func main() {
 	// Handle graceful shutdown
 	mux := http.NewServeMux()
+	
+	// Metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
+	
 	mux.HandleFunc("/dnsrequest", dnsRequestHandler)
 	mux.HandleFunc("/submitaction", submitActionHandler)
 	mux.HandleFunc("/register", registerHandler)
