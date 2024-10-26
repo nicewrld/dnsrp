@@ -6,8 +6,6 @@ services:
       context: ./dnsrp
     ports:
       - "5983:5983/udp"
-    volumes:
-      - ./Corefile:/root/Corefile
     depends_on:
       - gameserver
     networks:
