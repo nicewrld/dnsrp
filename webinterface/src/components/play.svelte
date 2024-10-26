@@ -137,7 +137,7 @@
             <p class="text-xl text-red-400">{errorMessage}</p>
             {#if countdown > 0}
                 <p class="text-sm text-gray-400 mt-2">
-                    Retrying in {(countdown / 1000).toFixed(1)} seconds...
+                    Retrying in {countdown} milliseconds...
                 </p>
                 <div class="w-full bg-gray-700 rounded-full h-2.5 mt-2">
                     <div class="bg-blue-500 h-2.5 rounded-full" style="width: {100 - (countdown / retryDelay * 100)}%"></div>
