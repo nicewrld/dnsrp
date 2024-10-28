@@ -92,7 +92,8 @@
     });
 </script>
 
-<div class="max-w-2xl mx-auto p-6 bg-gray-800 rounded-lg shadow-lg text-white">
+<div class="h-full flex items-center justify-center">
+    <div class="max-w-2xl w-full p-6 bg-gray-800 rounded-lg shadow-lg text-white">
     {#if dnsRequest}
         <div in:fly={{ y: 50, duration: 500 }} out:fade>
             <h1 class="text-3xl font-bold mb-6 text-center text-blue-400">
@@ -170,6 +171,7 @@
             {/if}
         </div>
     {/if}
+    </div>
 </div>
 
 <style>
