@@ -1,10 +1,10 @@
 // gameserver/main.go
 /*
- * yo this is dns server roleplay
- * 
- * what even is this?
+ * dns server roleplay
+ *
+ *
  * ==================
- * it's like a real dns server but players can choose what happens to requests
+ * it's a real dns server but players can choose what happens to requests
  * you can either be:
  * - normalcore (correct responses)
  * - evilmaxxing (corrupt the data)
@@ -58,7 +58,7 @@
  * - what players are doing
  * - if anything's broken
  *
- * made with <3 by nicewrld
+ *
  */
 
 package main
@@ -74,7 +74,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
-	"syscall" 
+	"syscall"
 	"time"
 
 	"github.com/nicewrld/gameserver/db"
@@ -110,7 +110,7 @@ var (
 	// dnsRequestQueueSize monitors the current queue depth
 	// Used for: Backpressure detection and auto-scaling triggers
 	dnsRequestQueueSize = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "gameserver_dns_request_queue_size", 
+		Name: "gameserver_dns_request_queue_size",
 		Help: "Current number of DNS requests waiting to be processed",
 	})
 
@@ -127,7 +127,7 @@ var (
 	// Used for: Capacity planning and engagement monitoring
 	playerCount = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gameserver_player_count",
-		Help: "Current number of registered players in the game", 
+		Help: "Current number of registered players in the game",
 	})
 
 	// playerActionCounter analyzes player behavior patterns
@@ -173,13 +173,13 @@ type DNSResponse struct {
 
 // Player tracks both game state and scoring
 type Player struct {
-	ID                string   // Unique player identifier
-	Nickname          string   // Display name
-	PurePoints        float64  // Points from correct responses
-	EvilPoints        float64  // Points from manipulated responses
-	PureDelta         float64  // Pure point changes pending DB sync
-	EvilDelta         float64  // Evil point changes pending DB sync
-	AssignedRequestID string   // Current request being handled
+	ID                string  // Unique player identifier
+	Nickname          string  // Display name
+	PurePoints        float64 // Points from correct responses
+	EvilPoints        float64 // Points from manipulated responses
+	PureDelta         float64 // Pure point changes pending DB sync
+	EvilDelta         float64 // Evil point changes pending DB sync
+	AssignedRequestID string  // Current request being handled
 }
 
 var (
@@ -255,7 +255,7 @@ func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 	// Send the action back to the DNS plugin
 	dnsResp := DNSResponse{Action: action}
 	json.NewEncoder(w).Encode(dnsResp)
-	
+
 	// Record request duration with action label
 	dnsRequestLatency.With(prometheus.Labels{
 		"action": action,
@@ -464,7 +464,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	playerID := generatePlayerID()
-	
+
 	// Create new player
 	player := &Player{
 		ID:         playerID,
@@ -538,7 +538,7 @@ func getEnv(key, fallback string) string {
 func main() {
 	// Get database path from environment variable
 	dbPath := getEnv("DB_PATH", "/litefs/gameserver.db")
-	
+
 	// Ensure database directory exists
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
@@ -573,10 +573,10 @@ func main() {
 
 	// Handle graceful shutdown
 	mux := http.NewServeMux()
-	
+
 	// Metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
-	
+
 	mux.HandleFunc("/dnsrequest", dnsRequestHandler)
 	mux.HandleFunc("/submitaction", submitActionHandler)
 	mux.HandleFunc("/register", registerHandler)
