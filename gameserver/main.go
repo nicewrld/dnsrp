@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"sync"
 	"syscall"
@@ -407,9 +408,26 @@ func syncPlayersToDatabase() {
 	}
 }
 
+// getEnv retrieves an environment variable with a fallback default value
+func getEnv(key, fallback string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return fallback
+}
+
 func main() {
+	// Get database path from environment variable
+	dbPath := getEnv("DB_PATH", "/litefs/gameserver.db")
+	
+	// Ensure database directory exists
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		log.Printf("Warning: Failed to create database directory: %v", err)
+	}
+
 	// Initialize database
-	if err := db.Initialize("/litefs/gameserver.db"); err != nil {
+	if err := db.Initialize(dbPath); err != nil {
 		log.Printf("Warning: Failed to initialize database: %v", err)
 	}
 

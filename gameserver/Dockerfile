@@ -16,4 +16,6 @@ RUN CGO_ENABLED=1 go build -o gameserver .
 
 EXPOSE 8080
 
+ENV DB_PATH=/litefs/gameserver.db
+
 CMD ["./gameserver"]
