@@ -91,11 +91,19 @@ func CreatePlayer(id, nickname string) error {
 // GetPlayer retrieves a player from the database
 func GetPlayer(id string) (*Player, error) {
 	var p Player
+	var lastRequestID sql.NullString
 	err := db.QueryRow(`
 		SELECT id, nickname, pure_points, evil_points, last_request_id, created_at, updated_at
 		FROM players
 		WHERE id = ?
-	`, id).Scan(&p.ID, &p.Nickname, &p.PurePoints, &p.EvilPoints, &p.LastRequestID, &p.CreatedAt, &p.UpdatedAt)
+	`, id).Scan(&p.ID, &p.Nickname, &p.PurePoints, &p.EvilPoints, &lastRequestID, &p.CreatedAt, &p.UpdatedAt)
+	if err == nil {
+		if lastRequestID.Valid {
+			p.LastRequestID = lastRequestID.String
+		} else {
+			p.LastRequestID = ""
+		}
+	}
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -140,7 +148,17 @@ func GetLeaderboard() ([]Player, error) {
 	var players []Player
 	for rows.Next() {
 		var p Player
-		err := rows.Scan(&p.ID, &p.Nickname, &p.PurePoints, &p.EvilPoints, &p.LastRequestID, &p.CreatedAt, &p.UpdatedAt)
+		var lastRequestID sql.NullString
+		err := rows.Scan(&p.ID, &p.Nickname, &p.PurePoints, &p.EvilPoints, &lastRequestID, &p.CreatedAt, &p.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		// Convert NULL to empty string if needed
+		if lastRequestID.Valid {
+			p.LastRequestID = lastRequestID.String
+		} else {
+			p.LastRequestID = ""
+		}
 		if err != nil {
 			return nil, err
 		}
