@@ -67,7 +67,9 @@ type Player struct {
 	Nickname          string
 	PurePoints        float64
 	EvilPoints        float64
-	AssignedRequestID string // Field to track assigned DNS request
+	PureDelta         float64 // Tracks changes since last sync
+	EvilDelta         float64 // Tracks changes since last sync
+	AssignedRequestID string  // Field to track assigned DNS request
 }
 
 var (
@@ -274,9 +276,11 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 	switch actionReq.Action {
 	case "correct":
 		player.PurePoints += 1
+		player.PureDelta += 1
 		playerActionCounter.With(prometheus.Labels{"action": "correct"}).Inc()
 	case "corrupt", "delay", "nxdomain":
 		player.EvilPoints += 1
+		player.EvilDelta += 1
 		playerActionCounter.With(prometheus.Labels{"action": actionReq.Action}).Inc()
 	default:
 		playersMu.Unlock()
@@ -398,12 +402,18 @@ func syncPlayersToDatabase() {
 	for range ticker.C {
 		playersMu.RLock()
 		for _, player := range players {
-			if err := db.UpdatePlayerPoints(player.ID, player.PurePoints, player.EvilPoints); err != nil {
-				log.Printf("Error syncing player %s to database: %v", player.ID, err)
+			if player.PureDelta != 0 || player.EvilDelta != 0 {
+				if err := db.AddPlayerPoints(player.ID, player.PureDelta, player.EvilDelta); err != nil {
+					log.Printf("Error syncing player %s to database: %v", player.ID, err)
+				} else {
+					// Reset deltas after successful sync
+					player.PureDelta = 0
+					player.EvilDelta = 0
+				}
 			}
 		}
 		playersMu.RUnlock()
-		log.Printf("Synced %d players to database", len(players))
+		log.Printf("Synced player deltas to database")
 	}
 }
 

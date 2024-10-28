@@ -110,15 +110,15 @@ func GetPlayer(id string) (*Player, error) {
 	return &p, err
 }
 
-// UpdatePlayerPoints updates a player's points
-func UpdatePlayerPoints(id string, purePoints, evilPoints float64) error {
+// AddPlayerPoints adds to a player's points
+func AddPlayerPoints(id string, pureDelta, evilDelta float64) error {
 	_, err := db.Exec(`
 		UPDATE players
-		SET pure_points = ?,
-			evil_points = ?,
+		SET pure_points = pure_points + ?,
+			evil_points = evil_points + ?,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
-	`, purePoints, evilPoints, id)
+	`, pureDelta, evilDelta, id)
 	return err
 }
 
