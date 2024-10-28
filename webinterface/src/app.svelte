@@ -2,6 +2,12 @@
   import { fade } from 'svelte/transition';
   let showAbout = false;
   import Router from 'svelte-spa-router';
+  
+  function handleKeydown(event) {
+    if (event.key === 'Escape' && showAbout) {
+      showAbout = false;
+    }
+  }
   import { link, location } from 'svelte-spa-router';
   import Play from './components/play.svelte';
   import Leaderboard from './components/leaderboard.svelte';
@@ -16,6 +22,7 @@
   };
 </script>
 
+<svelte:window on:keydown={handleKeydown}/>
 <div class="app-container">
   <nav class="sidebar">
     <div class="sidebar-content">
