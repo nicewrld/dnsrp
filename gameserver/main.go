@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nicewrld/gameserver/db"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -348,15 +349,27 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	playerID := generatePlayerID()
-	playersMu.Lock()
-	players[playerID] = &Player{
+	
+	// Create new player
+	player := &Player{
 		ID:         playerID,
 		Nickname:   nickname,
 		PurePoints: 0,
 		EvilPoints: 0,
 	}
+
+	// Store in memory
+	playersMu.Lock()
+	players[playerID] = player
 	playerCount.Set(float64(len(players)))
 	playersMu.Unlock()
+
+	// Persist to database asynchronously
+	go func() {
+		if err := db.CreatePlayer(playerID, nickname); err != nil {
+			log.Printf("Warning: Failed to persist player %s to database: %v", playerID, err)
+		}
+	}()
 
 	log.Printf("Registered player: %s (%s)", nickname, playerID)
 	w.Write([]byte(playerID))
@@ -378,7 +391,49 @@ func cleanupExpiredRequests() {
 	}
 }
 
+// syncPlayersToDatabase periodically syncs the in-memory player state to SQLite
+func syncPlayersToDatabase() {
+	ticker := time.NewTicker(30 * time.Second)
+	for range ticker.C {
+		playersMu.RLock()
+		for _, player := range players {
+			err := db.UpdatePlayerPoints(player.ID, player.PurePoints, player.EvilPoints)
+			if err != nil {
+				log.Printf("Error syncing player %s to database: %v", player.ID, err)
+			}
+		}
+		playersMu.RUnlock()
+		log.Printf("Synced %d players to database", len(players))
+	}
+}
+
 func main() {
+	// Initialize database
+	if err := db.Initialize("/litefs/gameserver.db"); err != nil {
+		log.Printf("Warning: Failed to initialize database: %v", err)
+	}
+
+	// Load existing players from database
+	dbPlayers, err := db.GetLeaderboard()
+	if err != nil {
+		log.Printf("Warning: Failed to load players from database: %v", err)
+	} else {
+		playersMu.Lock()
+		for _, p := range dbPlayers {
+			players[p.ID] = &Player{
+				ID:         p.ID,
+				Nickname:   p.Nickname,
+				PurePoints: p.PurePoints,
+				EvilPoints: p.EvilPoints,
+			}
+		}
+		playersMu.Unlock()
+		log.Printf("Loaded %d players from database", len(dbPlayers))
+	}
+
+	// Start periodic database sync
+	go syncPlayersToDatabase()
+
 	// Handle graceful shutdown
 	mux := http.NewServeMux()
 	
