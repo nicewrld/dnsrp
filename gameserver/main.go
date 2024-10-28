@@ -183,14 +183,22 @@ type Player struct {
 }
 
 var (
-	dnsRequests    = make(map[string]*DNSRequest) // Map of request ID to DNSRequest
-	players        = make(map[string]*Player)     // Map of player ID to Player
-	pendingActions sync.Map                       // Map of request ID to action channel
+	// Core data structures
+	dnsRequests    = make(map[string]*DNSRequest)
+	players        = make(map[string]*Player)
+	pendingActions sync.Map
 
-	dnsRequestsMu sync.RWMutex // Read-Write Mutex for dnsRequests
-	playersMu     sync.RWMutex // Read-Write Mutex for players
+	// Mutexes for thread safety
+	dnsRequestsMu sync.RWMutex
+	playersMu     sync.RWMutex
 
-	dnsRequestChan = make(chan *DNSRequest, 10000) // Buffered channel for DNS requests
+	// Channels and queues
+	dnsRequestChan = make(chan *DNSRequest, 10000)
+	dbJobQueue     *queue.JobQueue
+	
+	// Caches
+	leaderboardCache *cache.Cache
+	requestCache     *cache.Cache
 )
 
 const (
