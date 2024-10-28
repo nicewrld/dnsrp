@@ -40,10 +40,9 @@
         </button>
         
         {#if showAbout}
-          {#if showAbout}
-            <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-                 on:click={() => showAbout = false}
-                 transition:fade>
+          <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+               on:click={() => showAbout = false}
+               transition:fade>
               <div class="about-card bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-sm w-full mx-4"
                    on:click|stopPropagation>
                 <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">Contact</h3>
@@ -62,8 +61,7 @@
                   </a>
                 </div>
               </div>
-            </div>
-          {/if}
+          </div>
         {/if}
       </div>
     </div>
