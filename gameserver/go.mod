@@ -3,8 +3,8 @@ module github.com/nicewrld/gameserver
 go 1.21
 
 require (
+	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/prometheus/client_golang v1.17.0
-	github.com/mattn/go-sqlite3 v1.14.17
 )
 
 require (

@@ -41,8 +41,8 @@ services:
       - coredns
     environment:
       NUM_PLAYERS: 50
-      MAX_WORKERS: 25
-      NUM_THREADS: 25
+      MAX_WORKERS: 50
+      NUM_THREADS: 50
       DNS_SERVER: coredns
       DNS_PORT: 5983
       WEB_INTERFACE_HOST: webinterface:8081
