@@ -1,63 +1,64 @@
 // gameserver/main.go
 /*
- * DNS Game Server - A Competitive DNS Packet Manipulation Game
+ * yo this is dns server roleplay
+ * 
+ * what even is this?
+ * ==================
+ * it's like a real dns server but players can choose what happens to requests
+ * you can either be:
+ * - normalcore (correct responses)
+ * - evilmaxxing (corrupt the data)
+ * - eepypilled (add delays)
+ * - gaslightpilled (pretend domains don't exist)
  *
- * OVERVIEW
- * ========
- * This server implements a multiplayer game where players compete by handling DNS requests.
- * Players can choose to either forward requests correctly (pure) or manipulate them (evil)
- * to earn different types of points. The game explores the ethical implications of DNS
- * manipulation while teaching network concepts.
+ * how does it work?
+ * ================
+ * there's three main parts:
  *
- * ARCHITECTURE
- * ===========
- * The system follows a producer-consumer pattern with three main components:
- * 1. CoreDNS Plugin (Producer)
- *    - Intercepts real DNS requests
- *    - Forwards them to this game server via HTTP
- *    - Executes player-chosen actions
+ * 1. coredns plugin
+ *    - yoinks real dns requests
+ *    - sends them to our game
+ *    - does whatever the player says
  *
- * 2. Game Server (Coordinator)
- *    - Manages the request queue
- *    - Handles player registration and scoring
- *    - Coordinates request assignment and actions
+ * 2. game server (you are here)
+ *    - handles all the requests
+ *    - keeps track of players and points
+ *    - makes sure everything happens in order
  *
- * 3. Players (Consumers)
- *    - Poll for available DNS requests
- *    - Choose actions (correct/corrupt/delay/nxdomain)
- *    - Earn points based on their choices
+ * 3. players
+ *    - wait for dns requests to show up
+ *    - choose what to do with them
+ *    - get points based on their choices
  *
- * SYNCHRONIZATION
- * ==============
- * The server employs multiple synchronization mechanisms:
- * - sync.RWMutex: Protects shared maps with reader/writer separation
- * - Buffered Channels: Prevents request flooding with backpressure
- * - sync.Map: Lock-free concurrent map for pending actions
- * - Context: Coordinates graceful shutdown across goroutines
+ * under the hood
+ * =============
+ * - uses mutexes so players don't step on each other
+ * - has channels to stop request flooding
+ * - sync.Map for the real galaxy brain concurrent stuff
+ * - graceful shutdown when things go wrong
  *
- * DATA PERSISTENCE
- * ===============
- * Player data is managed in two layers:
- * 1. In-Memory (Hot Path)
- *    - Fast access for active gameplay
- *    - Protected by mutexes
- *    - Eventual consistency model
+ * where's the data stored?
+ * =======================
+ * two places:
+ * 1. ram (fast but temporary)
+ *    - for active gameplay
+ *    - protected by mutexes
+ *    - eventually syncs to disk
  *
- * 2. SQLite (Cold Storage) 
- *    - Persistent storage of player stats
- *    - Periodic sync from memory
- *    - LiteFS mounted for high availability
+ * 2. sqlite (slow but forever)
+ *    - saves everything important
+ *    - updates every 30 seconds
+ *    - uses litefs for redundancy
  *
- * METRICS & MONITORING
- * ===================
- * The server exports Prometheus metrics for:
- * - Request throughput and latency
- * - Queue depth and backpressure
- * - Player counts and action distributions
- * - Error rates and system health
+ * metrics and stuff
+ * ================
+ * prometheus tracks:
+ * - how many requests we're handling
+ * - if the queue is getting full
+ * - what players are doing
+ * - if anything's broken
  *
- * @author nicewrld
- * @version 1.0
+ * made with <3 by nicewrld
  */
 
 package main
