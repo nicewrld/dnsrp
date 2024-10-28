@@ -111,14 +111,14 @@ func GetPlayer(id string) (*Player, error) {
 }
 
 // UpdatePlayerPoints updates a player's points
-func UpdatePlayerPoints(id string, pureDelta, evilDelta float64) error {
+func UpdatePlayerPoints(id string, purePoints, evilPoints float64) error {
 	_, err := db.Exec(`
 		UPDATE players
-		SET pure_points = pure_points + ?,
-			evil_points = evil_points + ?,
+		SET pure_points = ?,
+			evil_points = ?,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
-	`, pureDelta, evilDelta, id)
+	`, purePoints, evilPoints, id)
 	return err
 }
 

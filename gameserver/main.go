@@ -398,8 +398,7 @@ func syncPlayersToDatabase() {
 	for range ticker.C {
 		playersMu.RLock()
 		for _, player := range players {
-			err := db.UpdatePlayerPoints(player.ID, player.PurePoints, player.EvilPoints)
-			if err != nil {
+			if err := db.UpdatePlayerPoints(player.ID, player.PurePoints, player.EvilPoints); err != nil {
 				log.Printf("Error syncing player %s to database: %v", player.ID, err)
 			}
 		}
