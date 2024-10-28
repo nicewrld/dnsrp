@@ -1,33 +1,63 @@
 // gameserver/main.go
 /*
- * DNS Game Server
+ * DNS Game Server - A Competitive DNS Packet Manipulation Game
  *
- * This is a game server that simulates DNS packet manipulation warfare.
- * Players compete by choosing how to handle DNS requests: they can either
- * forward them correctly (pure) or manipulate them (evil) for points.
+ * OVERVIEW
+ * ========
+ * This server implements a multiplayer game where players compete by handling DNS requests.
+ * Players can choose to either forward requests correctly (pure) or manipulate them (evil)
+ * to earn different types of points. The game explores the ethical implications of DNS
+ * manipulation while teaching network concepts.
  *
- * The architecture follows a producer-consumer pattern where:
- * 1. CoreDNS plugin produces DNS requests via HTTP
- * 2. Players consume requests from a bounded queue
- * 3. Player actions are sent back to CoreDNS for execution
+ * ARCHITECTURE
+ * ===========
+ * The system follows a producer-consumer pattern with three main components:
+ * 1. CoreDNS Plugin (Producer)
+ *    - Intercepts real DNS requests
+ *    - Forwards them to this game server via HTTP
+ *    - Executes player-chosen actions
  *
- * SYNCHRONIZATION ARCHITECTURE
- * 
- * The server uses several synchronization primitives:
- * - sync.RWMutex for player/request maps (allows concurrent reads)
- * - Buffered channels for request queue (prevents CoreDNS flooding)
- * - sync.Map for pending actions (lock-free for high concurrency)
- * - Context for graceful shutdown coordination
+ * 2. Game Server (Coordinator)
+ *    - Manages the request queue
+ *    - Handles player registration and scoring
+ *    - Coordinates request assignment and actions
  *
- * DATABASE ARCHITECTURE
+ * 3. Players (Consumers)
+ *    - Poll for available DNS requests
+ *    - Choose actions (correct/corrupt/delay/nxdomain)
+ *    - Earn points based on their choices
  *
- * Player state is managed in two tiers:
- * 1. In-memory for fast access during gameplay
- * 2. SQLite for persistence, updated periodically
+ * SYNCHRONIZATION
+ * ==============
+ * The server employs multiple synchronization mechanisms:
+ * - sync.RWMutex: Protects shared maps with reader/writer separation
+ * - Buffered Channels: Prevents request flooding with backpressure
+ * - sync.Map: Lock-free concurrent map for pending actions
+ * - Context: Coordinates graceful shutdown across goroutines
  *
- * The database is mounted via LiteFS for HA deployments.
+ * DATA PERSISTENCE
+ * ===============
+ * Player data is managed in two layers:
+ * 1. In-Memory (Hot Path)
+ *    - Fast access for active gameplay
+ *    - Protected by mutexes
+ *    - Eventual consistency model
+ *
+ * 2. SQLite (Cold Storage) 
+ *    - Persistent storage of player stats
+ *    - Periodic sync from memory
+ *    - LiteFS mounted for high availability
+ *
+ * METRICS & MONITORING
+ * ===================
+ * The server exports Prometheus metrics for:
+ * - Request throughput and latency
+ * - Queue depth and backpressure
+ * - Player counts and action distributions
+ * - Error rates and system health
  *
  * @author nicewrld
+ * @version 1.0
  */
 
 package main
@@ -63,36 +93,48 @@ import (
  * These metrics power our Grafana dashboards and alerts.
  * Labels allow drilling down by action type.
  */
+// PROMETHEUS METRICS
+// =================
+// These metrics provide real-time visibility into the game server's operation.
+// They are exported via /metrics and can be scraped by Prometheus.
+
 var (
-	// Track total DNS requests for capacity planning
+	// dnsRequestsTotal tracks the absolute number of DNS requests processed
+	// Used for: Capacity planning, traffic analysis, and growth tracking
 	dnsRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "gameserver_dns_requests_total",
-		Help: "Total number of DNS requests received",
+		Help: "Total number of DNS requests received since server start",
 	})
 
-	// Monitor queue backpressure in real-time
+	// dnsRequestQueueSize monitors the current queue depth
+	// Used for: Backpressure detection and auto-scaling triggers
 	dnsRequestQueueSize = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gameserver_dns_request_queue_size", 
-		Help: "Current size of the DNS request queue",
+		Help: "Current number of DNS requests waiting to be processed",
 	})
 
-	// Track request latency distributions by action type
+	// dnsRequestLatency measures request processing time distributions
+	// Used for: SLA monitoring and performance optimization
+	// Labels: action="correct|corrupt|delay|nxdomain"
 	dnsRequestLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "gameserver_dns_request_duration_seconds",
-		Help:    "DNS request latency in seconds",
-		Buckets: prometheus.DefBuckets, // Default buckets work well for DNS
+		Help:    "Time taken to process DNS requests by action type",
+		Buckets: prometheus.DefBuckets, // 0.005 to 10 seconds
 	}, []string{"action"})
 
-	// Track active player count for scaling decisions
+	// playerCount tracks the number of active players
+	// Used for: Capacity planning and engagement monitoring
 	playerCount = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gameserver_player_count",
-		Help: "Current number of registered players", 
+		Help: "Current number of registered players in the game", 
 	})
 
-	// Track action distributions to detect gameplay patterns
+	// playerActionCounter analyzes player behavior patterns
+	// Used for: Game balance analysis and cheat detection
+	// Labels: action="correct|corrupt|delay|nxdomain"
 	playerActionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gameserver_player_actions_total",
-		Help: "Total number of actions by type",
+		Help: "Distribution of actions chosen by players",
 	}, []string{"action"})
 )
 
