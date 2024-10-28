@@ -1,3 +1,8 @@
+// yo this is our database stuff
+// ===========================
+// we use sqlite cuz it's simple and just works
+// litefs makes sure we don't lose data when things crash
+
 package db
 
 import (
@@ -12,31 +17,31 @@ import (
 )
 
 var (
-	db   *sql.DB
-	once sync.Once
+	db   *sql.DB     // our connection to sqlite
+	once sync.Once   // makes sure we only set up once
 )
 
-// Player represents a player in the database
+// all the stuff we track about players
 type Player struct {
-	ID            string
-	Nickname      string
-	PurePoints    float64
-	EvilPoints    float64
-	LastRequestID string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID            string    // their unique id
+	Nickname      string    // what they call themselves
+	PurePoints    float64   // points for being nice
+	EvilPoints    float64   // points for being chaotic
+	LastRequestID string    // the last dns request they got
+	CreatedAt     time.Time // when they joined
+	UpdatedAt     time.Time // last time we updated them
 }
 
-// Initialize sets up the database connection
+// fire up the database
 func Initialize(dbPath string) error {
 	var err error
 	once.Do(func() {
-		// Check if database file exists
+		// see if we already have a database
 		_, err = os.Stat(dbPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				log.Printf("Database file does not exist at %s, creating new database", dbPath)
-				// Ensure the directory exists
+				log.Printf("no database found at %s, making a fresh one", dbPath)
+				// make sure we have somewhere to put it
 				if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 					return
 				}
@@ -44,7 +49,7 @@ func Initialize(dbPath string) error {
 				return
 			}
 		} else {
-			log.Printf("Using existing database at %s", dbPath)
+			log.Printf("found existing database at %s", dbPath)
 		}
 
 		// Open database connection
