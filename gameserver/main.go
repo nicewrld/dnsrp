@@ -1,4 +1,35 @@
 // gameserver/main.go
+/*
+ * DNS Game Server
+ *
+ * This is a game server that simulates DNS packet manipulation warfare.
+ * Players compete by choosing how to handle DNS requests: they can either
+ * forward them correctly (pure) or manipulate them (evil) for points.
+ *
+ * The architecture follows a producer-consumer pattern where:
+ * 1. CoreDNS plugin produces DNS requests via HTTP
+ * 2. Players consume requests from a bounded queue
+ * 3. Player actions are sent back to CoreDNS for execution
+ *
+ * SYNCHRONIZATION ARCHITECTURE
+ * 
+ * The server uses several synchronization primitives:
+ * - sync.RWMutex for player/request maps (allows concurrent reads)
+ * - Buffered channels for request queue (prevents CoreDNS flooding)
+ * - sync.Map for pending actions (lock-free for high concurrency)
+ * - Context for graceful shutdown coordination
+ *
+ * DATABASE ARCHITECTURE
+ *
+ * Player state is managed in two tiers:
+ * 1. In-memory for fast access during gameplay
+ * 2. SQLite for persistence, updated periodically
+ *
+ * The database is mounted via LiteFS for HA deployments.
+ *
+ * @author nicewrld
+ */
+
 package main
 
 import (
@@ -12,7 +43,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
-	"syscall"
+	"syscall" 
 	"time"
 
 	"github.com/nicewrld/gameserver/db"
@@ -21,55 +52,91 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+/*
+ * PROMETHEUS METRICS
+ *
+ * We use several metric types to monitor game health:
+ * - Counter: Monotonically increasing values (total requests)
+ * - Gauge: Values that go up/down (queue size, player count)
+ * - Histogram: Distribution of values (latency percentiles)
+ *
+ * These metrics power our Grafana dashboards and alerts.
+ * Labels allow drilling down by action type.
+ */
 var (
-	// Metrics
+	// Track total DNS requests for capacity planning
 	dnsRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "gameserver_dns_requests_total",
 		Help: "Total number of DNS requests received",
 	})
+
+	// Monitor queue backpressure in real-time
 	dnsRequestQueueSize = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "gameserver_dns_request_queue_size",
+		Name: "gameserver_dns_request_queue_size", 
 		Help: "Current size of the DNS request queue",
 	})
+
+	// Track request latency distributions by action type
 	dnsRequestLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "gameserver_dns_request_duration_seconds",
 		Help:    "DNS request latency in seconds",
-		Buckets: prometheus.DefBuckets,
+		Buckets: prometheus.DefBuckets, // Default buckets work well for DNS
 	}, []string{"action"})
+
+	// Track active player count for scaling decisions
 	playerCount = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gameserver_player_count",
-		Help: "Current number of registered players",
+		Help: "Current number of registered players", 
 	})
+
+	// Track action distributions to detect gameplay patterns
 	playerActionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gameserver_player_actions_total",
 		Help: "Total number of actions by type",
 	}, []string{"action"})
 )
 
-// DNSRequest represents a DNS query received by the gameserver
+/*
+ * CORE DATA STRUCTURES
+ *
+ * The game revolves around three key types:
+ *
+ * 1. DNSRequest - Represents an incoming query from CoreDNS
+ *    The RequestID field enables request deduplication and tracking
+ *    Timestamp helps with request expiration/cleanup
+ *
+ * 2. DNSResponse - The action to take on a DNS request
+ *    Currently just an action string, but extensible for future features
+ *
+ * 3. Player - Tracks a player's state and score
+ *    Uses separate point types to enable different gameplay strategies
+ *    Deltas track changes between DB syncs for efficient updates
+ */
+
+// DNSRequest captures all relevant fields from CoreDNS queries
 type DNSRequest struct {
-	RequestID string    `json:"request_id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Class     string    `json:"class"`
-	Assigned  bool      `json:"assigned"`
-	Timestamp time.Time `json:"timestamp"`
+	RequestID string    `json:"request_id"` // Unique ID for tracking
+	Name      string    `json:"name"`       // Query domain name
+	Type      string    `json:"type"`       // Query type (A, AAAA, etc)
+	Class     string    `json:"class"`      // Query class (usually IN)
+	Assigned  bool      `json:"assigned"`   // Whether a player owns this
+	Timestamp time.Time `json:"timestamp"`  // When request was received
 }
 
-// **Define DNSResponse type**
+// DNSResponse tells CoreDNS how to handle a query
 type DNSResponse struct {
-	Action string `json:"action"`
+	Action string `json:"action"` // correct/corrupt/delay/nxdomain
 }
 
-// Player represents a player in the game
+// Player tracks both game state and scoring
 type Player struct {
-	ID                string
-	Nickname          string
-	PurePoints        float64
-	EvilPoints        float64
-	PureDelta         float64 // Tracks changes since last sync
-	EvilDelta         float64 // Tracks changes since last sync
-	AssignedRequestID string  // Field to track assigned DNS request
+	ID                string   // Unique player identifier
+	Nickname          string   // Display name
+	PurePoints        float64  // Points from correct responses
+	EvilPoints        float64  // Points from manipulated responses
+	PureDelta         float64  // Pure point changes pending DB sync
+	EvilDelta         float64  // Evil point changes pending DB sync
+	AssignedRequestID string   // Current request being handled
 }
 
 var (
