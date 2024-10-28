@@ -40,23 +40,30 @@
         </button>
         
         {#if showAbout}
-          <div 
-            class="about-card"
-            transition:fade
-            on:click|stopPropagation
-          >
-            <h3 class="text-lg font-bold mb-2">Contact</h3>
-            <div class="flex flex-col gap-2">
-              <a href="https://twitter.com/spuhghetti" target="_blank" rel="noopener noreferrer" class="about-link">
-                <TwitterIcon size={16} />
-                <span>@spuhghetti</span>
-              </a>
-              <a href="mailto:h@hhh.hn" class="about-link">
-                <MailIcon size={16} />
-                <span>h@hhh.hn</span>
-              </a>
+          {#if showAbout}
+            <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                 on:click={() => showAbout = false}
+                 transition:fade>
+              <div class="about-card bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-sm w-full mx-4"
+                   on:click|stopPropagation>
+                <h3 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">Contact</h3>
+                <div class="flex flex-col gap-3">
+                  <a href="https://twitter.com/spuhghetti" 
+                     target="_blank" 
+                     rel="noopener noreferrer" 
+                     class="about-link">
+                    <TwitterIcon size={20} />
+                    <span>@spuhghetti</span>
+                  </a>
+                  <a href="mailto:h@hhh.hn" 
+                     class="about-link">
+                    <MailIcon size={20} />
+                    <span>h@hhh.hn</span>
+                  </a>
+                </div>
+              </div>
             </div>
-          </div>
+          {/if}
         {/if}
       </div>
     </div>
@@ -167,30 +174,32 @@
   }
 
   .about-card {
-    position: absolute;
-    bottom: calc(var(--sidebar-inner-padding, 16px) + 60px);
-    left: var(--sidebar-inner-padding, 16px);
-    background: white;
-    padding: 1rem;
-    border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    color: #333;
-    width: calc(100% - var(--sidebar-inner-padding, 16px) * 2);
+    transform: translateY(0);
+    transition: transform 0.2s ease-out;
   }
 
   .about-link {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.75rem;
+    padding: 0.75rem;
     color: #2c3e50;
     text-decoration: none;
-    padding: 0.25rem;
-    border-radius: 4px;
-    transition: background-color 0.2s;
+    border-radius: 0.5rem;
+    transition: all 0.2s ease;
   }
 
   .about-link:hover {
-    background-color: #f0f0f0;
+    background-color: rgba(0, 0, 0, 0.05);
+    transform: translateY(-1px);
+  }
+
+  :global(.dark) .about-link {
+    color: #e2e8f0;
+  }
+
+  :global(.dark) .about-link:hover {
+    background-color: rgba(255, 255, 255, 0.05);
   }
 
   @media (max-width: 768px) {
