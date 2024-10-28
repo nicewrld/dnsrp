@@ -2,6 +2,9 @@ package db
 
 import (
 	"database/sql"
+	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -28,14 +31,35 @@ type Player struct {
 func Initialize(dbPath string) error {
 	var err error
 	once.Do(func() {
+		// Check if database file exists
+		_, err = os.Stat(dbPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				log.Printf("Database file does not exist at %s, creating new database", dbPath)
+				// Ensure the directory exists
+				if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+					return
+				}
+			} else {
+				return
+			}
+		} else {
+			log.Printf("Using existing database at %s", dbPath)
+		}
+
+		// Open database connection
 		db, err = sql.Open("sqlite3", dbPath)
 		if err != nil {
 			return
 		}
 
+		// Test the connection
+		if err = db.Ping(); err != nil {
+			return
+		}
+
 		// Enable WAL mode for better concurrency
-		_, err = db.Exec("PRAGMA journal_mode=WAL")
-		if err != nil {
+		if _, err = db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 			return
 		}
 
