@@ -1,41 +1,79 @@
 <script>
+    /*
+     *  DNS ROLEPLAY GAME - PLAY COMPONENT
+     *  ─────────────────────────────────
+     *  This component implements the core gameplay loop where players choose how
+     *  to respond to DNS requests. It's built as a reactive state machine with
+     *  the following states:
+     *
+     *    1. LOADING   - Fetching next DNS request from server
+     *    2. READY     - Displaying request and waiting for player action
+     *    3. ERROR     - No requests available, counting down to retry
+     *    4. SUBMITTING - Sending player's chosen action to server
+     *
+     *  The game flow is deliberately throttled with random delays to prevent
+     *  players from overwhelming the DNS server. This creates natural pauses
+     *  that make the game feel more thoughtful and strategic.
+     */
+
     import { onMount } from "svelte";
-    import { fade, fly } from "svelte/transition";
-    import { push } from "svelte-spa-router";
+    import { fade, fly } from "svelte/transition"; // Smooth UI transitions
+    import { push } from "svelte-spa-router";      // Client-side navigation
 
-    let dnsRequest = null;
-    let selectedAction = "";
-    let errorMessage = "";
-    let submissionMessage = "";
-    let countdown = 0;
-    let retryDelay = 0;
-    let countdownInterval;
-    let isSubmitting = false;
+    // Core state variables
+    let dnsRequest = null;        // Current DNS request being handled
+    let selectedAction = "";      // Player's chosen action (correct/corrupt/etc)
+    let errorMessage = "";        // Display message when requests unavailable  
+    let submissionMessage = "";   // Feedback after submitting action
+    
+    // Retry mechanism state
+    let countdown = 0;            // Milliseconds until next retry
+    let retryDelay = 0;          // Total delay for current retry attempt
+    let countdownInterval;        // Timer handle for countdown animation
+    let isSubmitting = false;     // Prevents double-submissions
 
+    /**
+     * Fetches the next DNS request for the player to handle.
+     *
+     * The server uses a token bucket rate limiter, so requests may not always
+     * be available. When this happens, we back off with a random delay between
+     * 1-5 seconds to prevent thundering herd problems.
+     *
+     * If the player isn't logged in (401), we redirect them to registration.
+     * This creates a natural progression where new players must register before
+     * they can start manipulating DNS responses.
+     */
     async function getDNSRequest() {
         try {
             const response = await fetch("/api/play");
             console.log("getDNSRequest response status:", response.status);
 
             if (response.ok) {
+                // Happy path - we got a request to handle
                 dnsRequest = await response.json();
                 console.log("Received DNS request:", dnsRequest);
 
+                // Reset UI state
                 errorMessage = "";
                 submissionMessage = "";
                 selectedAction = "";
-
                 clearInterval(countdownInterval);
                 countdown = 0;
+
             } else if (response.status === 401) {
+                // Not logged in - send them to registration
                 push("/register");
+
             } else {
+                // No requests available - implement exponential backoff
                 errorMessage = "No DNS requests available.";
-                retryDelay = getRandomInt(1000, 5000);
+                retryDelay = getRandomInt(1000, 5000); // 1-5 second delay
                 countdown = retryDelay;
                 startRetryCountdown();
             }
+
         } catch (error) {
+            // Network/server error - also back off
             console.error("Error fetching DNS request:", error);
             errorMessage = "Failed to get DNS request.";
             retryDelay = getRandomInt(1000, 5000);
@@ -44,10 +82,17 @@
         }
     }
 
+    /**
+     * Implements a smooth countdown timer with progress bar animation.
+     * Updates every 10ms for fluid visual feedback.
+     * 
+     * The progress bar helps players understand when the next request will
+     * be available, making the waiting period feel more engaging.
+     */
     function startRetryCountdown() {
         clearInterval(countdownInterval);
         countdownInterval = setInterval(() => {
-            countdown -= 10;
+            countdown -= 10; // 10ms decrements for smooth animation
             if (countdown <= 0) {
                 clearInterval(countdownInterval);
                 getDNSRequest();
@@ -55,13 +100,34 @@
         }, 10);
     }
 
+    /**
+     * Returns a random integer between min and max (inclusive).
+     * Used for jittering retry delays to prevent synchronized retries
+     * from multiple clients hitting the server at once.
+     */
     function getRandomInt(min, max) {
         return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
+    /**
+     * Submits the player's chosen action for the current DNS request.
+     * 
+     * Actions can be:
+     * - correct: Return the true DNS record
+     * - corrupt: Return a random incorrect IP
+     * - delay: Add artificial latency
+     * - nxdomain: Claim the domain doesn't exist
+     *
+     * We add a random delay after successful submission to:
+     * 1. Give players time to see the success message
+     * 2. Prevent rapid-fire submissions
+     * 3. Make the game feel more deliberate and impactful
+     */
     async function submitAction() {
+        // Prevent double-submissions during server roundtrip
         if (isSubmitting) return;
         isSubmitting = true;
+
         const res = await fetch("/api/submit", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -70,17 +136,22 @@
                 request_id: dnsRequest.request_id,
             }),
         });
+
         if (res.ok) {
             submissionMessage = "Action submitted successfully!";
             selectedAction = "";
+
+            // Random delay between 0-1000ms before fetching next request
             await new Promise((resolve) =>
                 setTimeout(resolve, Math.random() * 1000),
             );
             await getDNSRequest();
+
         } else {
             const errorText = await res.text();
             submissionMessage = `Failed to submit action: ${errorText}`;
         }
+
         isSubmitting = false;
     }
 
