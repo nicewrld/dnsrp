@@ -413,12 +413,7 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid action", http.StatusBadRequest)
 		return
 	}
-	// Clear the player's assigned request
-	player.AssignedRequestID = ""
-	playersMu.Unlock()
-	log.Printf("Cleared assigned request for player %s", actionReq.PlayerID)
-
-	// Notify the DNS request handler
+	// Notify the DNS request handler first
 	value, ok := pendingActions.Load(actionReq.RequestID)
 	if ok {
 		actionChan := value.(chan string)
@@ -426,6 +421,11 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		log.Printf("Action channel not found for request %s", actionReq.RequestID)
 	}
+
+	// Clear the player's assigned request after sending the action
+	player.AssignedRequestID = ""
+	playersMu.Unlock()
+	log.Printf("Cleared assigned request for player %s", actionReq.PlayerID)
 
 	log.Printf("Player %s submitted action '%s' for request %s", actionReq.PlayerID, actionReq.Action, actionReq.RequestID)
 
