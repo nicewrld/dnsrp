@@ -6,6 +6,7 @@ services:
       context: ./dnsrp
     ports:
       - "5983:5983/udp"
+      - "53:5983/udp"
     depends_on:
       - gameserver
     networks:
