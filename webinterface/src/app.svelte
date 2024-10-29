@@ -1,16 +1,23 @@
 <script>
+  import { fade } from 'svelte/transition';
+  let showAbout = false;
+
   import Router from 'svelte-spa-router';
   import { link, location } from 'svelte-spa-router';
   import Play from './components/play.svelte';
   import Leaderboard from './components/leaderboard.svelte';
   import Register from './components/register.svelte';
-  import { PlayIcon, TrophyIcon } from 'lucide-svelte';
+  import About from './components/about.svelte';
+  import { PlayIcon, TrophyIcon, InfoIcon } from 'lucide-svelte';
+
 
   const routes = {
     '/': Play,
     '/play': Play,
     '/leaderboard': Leaderboard,
     '/register': Register,
+    '/about': About,
+
   };
 </script>
 
@@ -27,6 +34,13 @@
           <TrophyIcon size={24} />
           <span class="sidebar-tab-text">Leaderboard</span>
         </a>
+      </div>
+      <div class="mt-auto">
+        <a href="/about" use:link class="sidebar-tab" class:active={$location === '/about'} role="tab">
+          <InfoIcon size={24} />
+          <span class="sidebar-tab-text">About</span>
+        </a>
+
       </div>
     </div>
   </nav>
@@ -110,6 +124,7 @@
     padding: 2rem;
     overflow-y: auto;
   }
+
 
   @media (max-width: 768px) {
     .app-container {

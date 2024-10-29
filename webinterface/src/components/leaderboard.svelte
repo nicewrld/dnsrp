@@ -1,20 +1,37 @@
-<!-- frontend/src/components/Leaderboard.svelte -->
 <script>
     import { onMount } from "svelte";
 
     let leaderboard = [];
+    let currentPage = 1;
+    let hasMore = true;
 
-    async function getLeaderboard() {
-        const response = await fetch("/api/leaderboard");
+    async function getLeaderboard(page) {
+        const response = await fetch(`/api/leaderboard?page=${page}`);
         if (response.ok) {
-            leaderboard = await response.json();
+            const data = await response.json();
+            leaderboard = data;
+            hasMore = data.length === 50;
         } else {
             alert("Failed to get leaderboard.");
         }
     }
 
+    function nextPage() {
+        if (hasMore) {
+            currentPage++;
+            getLeaderboard(currentPage);
+        }
+    }
+
+    function previousPage() {
+        if (currentPage > 1) {
+            currentPage--;
+            getLeaderboard(currentPage);
+        }
+    }
+
     onMount(() => {
-        getLeaderboard();
+        getLeaderboard(currentPage);
     });
 </script>
 
@@ -40,4 +57,20 @@
             {/each}
         </tbody>
     </table>
+    
+    <div class="flex justify-center gap-4 mt-6">
+        <button 
+            class="px-4 py-2 bg-gray-800 text-white rounded-lg disabled:opacity-50"
+            on:click={previousPage}
+            disabled={currentPage === 1}>
+            Previous
+        </button>
+        <span class="py-2">Page {currentPage}</span>
+        <button 
+            class="px-4 py-2 bg-gray-800 text-white rounded-lg disabled:opacity-50"
+            on:click={nextPage}
+            disabled={!hasMore}>
+            Next
+        </button>
+    </div>
 </div>

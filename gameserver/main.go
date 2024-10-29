@@ -1,4 +1,66 @@
 // gameserver/main.go
+/*
+ * dns server roleplay
+ *
+ *
+ * ==================
+ * it's a real dns server but players can choose what happens to requests
+ * you can either be:
+ * - normalcore (correct responses)
+ * - evilmaxxing (corrupt the data)
+ * - eepypilled (add delays)
+ * - gaslightpilled (pretend domains don't exist)
+ *
+ * how does it work?
+ * ================
+ * there's three main parts:
+ *
+ * 1. coredns plugin
+ *    - yoinks real dns requests
+ *    - sends them to our game
+ *    - does whatever the player says
+ *
+ * 2. game server (you are here)
+ *    - handles all the requests
+ *    - keeps track of players and points
+ *    - makes sure everything happens in order
+ *
+ * 3. players
+ *    - wait for dns requests to show up
+ *    - choose what to do with them
+ *    - get points based on their choices
+ *
+ * under the hood
+ * =============
+ * - uses mutexes so players don't step on each other
+ * - has channels to stop request flooding
+ * - sync.Map for the real galaxy brain concurrent stuff
+ * - graceful shutdown when things go wrong
+ *
+ * where's the data stored?
+ * =======================
+ * two places:
+ * 1. ram (fast but temporary)
+ *    - for active gameplay
+ *    - protected by mutexes
+ *    - eventually syncs to disk
+ *
+ * 2. sqlite (slow but forever)
+ *    - saves everything important
+ *    - updates every 30 seconds
+ *    - uses litefs for redundancy
+ *
+ * metrics and stuff
+ * ================
+ * prometheus tracks:
+ * - how many requests we're handling
+ * - if the queue is getting full
+ * - what players are doing
+ * - if anything's broken
+ *
+ *
+ */
+
 package main
 
 import (
@@ -9,45 +71,137 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/nicewrld/gameserver/cache"
+	"github.com/nicewrld/gameserver/db"
+	"github.com/nicewrld/gameserver/queue"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// DNSRequest represents a DNS query received by the gameserver
+/*
+ * PROMETHEUS METRICS
+ *
+ * We use several metric types to monitor game health:
+ * - Counter: Monotonically increasing values (total requests)
+ * - Gauge: Values that go up/down (queue size, player count)
+ * - Histogram: Distribution of values (latency percentiles)
+ *
+ * These metrics power our Grafana dashboards and alerts.
+ * Labels allow drilling down by action type.
+ */
+// PROMETHEUS METRICS
+// =================
+// These metrics provide real-time visibility into the game server's operation.
+// They are exported via /metrics and can be scraped by Prometheus.
+
+var (
+	// dnsRequestsTotal tracks the absolute number of DNS requests processed
+	// Used for: Capacity planning, traffic analysis, and growth tracking
+	dnsRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "gameserver_dns_requests_total",
+		Help: "Total number of DNS requests received since server start",
+	})
+
+	// dnsRequestQueueSize monitors the current queue depth
+	// Used for: Backpressure detection and auto-scaling triggers
+	dnsRequestQueueSize = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "gameserver_dns_request_queue_size",
+		Help: "Current number of DNS requests waiting to be processed",
+	})
+
+	// dnsRequestLatency measures request processing time distributions
+	// Used for: SLA monitoring and performance optimization
+	// Labels: action="correct|corrupt|delay|nxdomain"
+	dnsRequestLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "gameserver_dns_request_duration_seconds",
+		Help:    "Time taken to process DNS requests by action type",
+		Buckets: prometheus.DefBuckets, // 0.005 to 10 seconds
+	}, []string{"action"})
+
+	// playerCount tracks the number of active players
+	// Used for: Capacity planning and engagement monitoring
+	playerCount = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "gameserver_player_count",
+		Help: "Current number of registered players in the game",
+	})
+
+	// playerActionCounter analyzes player behavior patterns
+	// Used for: Game balance analysis and cheat detection
+	// Labels: action="correct|corrupt|delay|nxdomain"
+	playerActionCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "gameserver_player_actions_total",
+		Help: "Distribution of actions chosen by players",
+	}, []string{"action"})
+)
+
+/*
+ * CORE DATA STRUCTURES
+ *
+ * The game revolves around three key types:
+ *
+ * 1. DNSRequest - Represents an incoming query from CoreDNS
+ *    The RequestID field enables request deduplication and tracking
+ *    Timestamp helps with request expiration/cleanup
+ *
+ * 2. DNSResponse - The action to take on a DNS request
+ *    Currently just an action string, but extensible for future features
+ *
+ * 3. Player - Tracks a player's state and score
+ *    Uses separate point types to enable different gameplay strategies
+ *    Deltas track changes between DB syncs for efficient updates
+ */
+
+// DNSRequest captures all relevant fields from CoreDNS queries
 type DNSRequest struct {
-	RequestID string    `json:"request_id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Class     string    `json:"class"`
-	Assigned  bool      `json:"assigned"`
-	Timestamp time.Time `json:"timestamp"`
+	RequestID string    `json:"request_id"` // Unique ID for tracking
+	Name      string    `json:"name"`       // Query domain name
+	Type      string    `json:"type"`       // Query type (A, AAAA, etc)
+	Class     string    `json:"class"`      // Query class (usually IN)
+	Assigned  bool      `json:"assigned"`   // Whether a player owns this
+	Timestamp time.Time `json:"timestamp"`  // When request was received
 }
 
-// **Define DNSResponse type**
+// DNSResponse tells CoreDNS how to handle a query
 type DNSResponse struct {
-	Action string `json:"action"`
+	Action string `json:"action"` // correct/corrupt/delay/nxdomain
 }
 
-// Player represents a player in the game
+// Player tracks both game state and scoring
 type Player struct {
-	ID                string
-	Nickname          string
-	PurePoints        float64
-	EvilPoints        float64
-	AssignedRequestID string // Field to track assigned DNS request
+	ID                string  // Unique player identifier
+	Nickname          string  // Display name
+	PurePoints        float64 // Points from correct responses
+	EvilPoints        float64 // Points from manipulated responses
+	PureDelta         float64 // Pure point changes pending DB sync
+	EvilDelta         float64 // Evil point changes pending DB sync
+	AssignedRequestID string  // Current request being handled
 }
 
 var (
-	dnsRequests    = make(map[string]*DNSRequest) // Map of request ID to DNSRequest
-	players        = make(map[string]*Player)     // Map of player ID to Player
-	pendingActions sync.Map                       // Map of request ID to action channel
+	// Core data structures
+	dnsRequests    = make(map[string]*DNSRequest)
+	players        = make(map[string]*Player)
+	pendingActions sync.Map
 
-	dnsRequestsMu sync.RWMutex // Read-Write Mutex for dnsRequests
-	playersMu     sync.RWMutex // Read-Write Mutex for players
+	// Mutexes for thread safety
+	dnsRequestsMu sync.RWMutex
+	playersMu     sync.RWMutex
 
-	dnsRequestChan = make(chan *DNSRequest, 10000) // Buffered channel for DNS requests
+	// Channels and queues
+	dnsRequestChan = make(chan *DNSRequest, 10000)
+	dbJobQueue     *queue.JobQueue
+	
+	// Caches
+	leaderboardCache *cache.Cache
+	requestCache     *cache.Cache
 )
 
 const (
@@ -56,6 +210,8 @@ const (
 
 // dnsRequestHandler handles incoming DNS requests from CoreDNS
 func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	dnsRequestsTotal.Inc()
 	var dnsReq DNSRequest
 	err := json.NewDecoder(r.Body).Decode(&dnsReq)
 	if err != nil {
@@ -83,6 +239,7 @@ func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 	select {
 	case dnsRequestChan <- &dnsReq:
 		dnsQueueSize := len(dnsRequestChan)
+		dnsRequestQueueSize.Set(float64(dnsQueueSize))
 		log.Printf("[RequestID: %s] Received DNS request: %v. Queue size: %d", dnsReq.RequestID, dnsReq, dnsQueueSize)
 	default:
 		// Queue is full
@@ -109,6 +266,11 @@ func dnsRequestHandler(w http.ResponseWriter, r *http.Request) {
 	// Send the action back to the DNS plugin
 	dnsResp := DNSResponse{Action: action}
 	json.NewEncoder(w).Encode(dnsResp)
+
+	// Record request duration with action label
+	dnsRequestLatency.With(prometheus.Labels{
+		"action": action,
+	}).Observe(time.Since(start).Seconds())
 
 	// Clean up
 	dnsRequestsMu.Lock()
@@ -235,8 +397,12 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 	switch actionReq.Action {
 	case "correct":
 		player.PurePoints += 1
+		player.PureDelta += 1
+		playerActionCounter.With(prometheus.Labels{"action": "correct"}).Inc()
 	case "corrupt", "delay", "nxdomain":
 		player.EvilPoints += 1
+		player.EvilDelta += 1
+		playerActionCounter.With(prometheus.Labels{"action": actionReq.Action}).Inc()
 	default:
 		playersMu.Unlock()
 		log.Printf("Invalid action submitted by player %s: %s", actionReq.PlayerID, actionReq.Action)
@@ -262,7 +428,7 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// leaderboardHandler returns the current leaderboard
+// leaderboardHandler returns the current leaderboard with pagination
 func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 	type LeaderboardEntry struct {
 		PlayerID     string  `json:"player_id"`
@@ -271,6 +437,13 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 		EvilPoints   float64 `json:"evil_points"`
 		NetAlignment float64 `json:"net_alignment"`
 	}
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	pageSize := 50 // Fixed page size of 50 items
 
 	playersMu.RLock()
 	defer playersMu.RUnlock()
@@ -286,13 +459,26 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Sort the leaderboard by NetAlignment in descending order
+	// Sort the leaderboard by total points in descending order
 	sort.Slice(leaderboard, func(i, j int) bool {
-		return leaderboard[i].NetAlignment > leaderboard[j].NetAlignment
+		totalI := leaderboard[i].PurePoints + leaderboard[i].EvilPoints
+		totalJ := leaderboard[j].PurePoints + leaderboard[j].EvilPoints
+		return totalI > totalJ
 	})
 
+	// Calculate pagination bounds
+	startIndex := (page - 1) * pageSize
+	endIndex := startIndex + pageSize
+	if startIndex >= len(leaderboard) {
+		startIndex = 0
+		endIndex = 0
+	} else if endIndex > len(leaderboard) {
+		endIndex = len(leaderboard)
+	}
+
+	// Return the paginated slice
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(leaderboard)
+	json.NewEncoder(w).Encode(leaderboard[startIndex:endIndex])
 }
 
 // generatePlayerID creates a unique PlayerID based on the current timestamp
@@ -309,14 +495,27 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	playerID := generatePlayerID()
-	playersMu.Lock()
-	players[playerID] = &Player{
+
+	// Create new player
+	player := &Player{
 		ID:         playerID,
 		Nickname:   nickname,
 		PurePoints: 0,
 		EvilPoints: 0,
 	}
+
+	// Store in memory
+	playersMu.Lock()
+	players[playerID] = player
+	playerCount.Set(float64(len(players)))
 	playersMu.Unlock()
+
+	// Persist to database asynchronously
+	go func() {
+		if err := db.CreatePlayer(playerID, nickname); err != nil {
+			log.Printf("Warning: Failed to persist player %s to database: %v", playerID, err)
+		}
+	}()
 
 	log.Printf("Registered player: %s (%s)", nickname, playerID)
 	w.Write([]byte(playerID))
@@ -338,9 +537,77 @@ func cleanupExpiredRequests() {
 	}
 }
 
+// syncPlayersToDatabase periodically syncs the in-memory player state to SQLite
+func syncPlayersToDatabase() {
+	ticker := time.NewTicker(30 * time.Second)
+	for range ticker.C {
+		playersMu.RLock()
+		for _, player := range players {
+			if player.PureDelta != 0 || player.EvilDelta != 0 {
+				if err := db.AddPlayerPoints(player.ID, player.PureDelta, player.EvilDelta); err != nil {
+					log.Printf("Error syncing player %s to database: %v", player.ID, err)
+				} else {
+					// Reset deltas after successful sync
+					player.PureDelta = 0
+					player.EvilDelta = 0
+				}
+			}
+		}
+		playersMu.RUnlock()
+		log.Printf("Synced player deltas to database")
+	}
+}
+
+// getEnv retrieves an environment variable with a fallback default value
+func getEnv(key, fallback string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return fallback
+}
+
 func main() {
+	// Get database path from environment variable
+	dbPath := getEnv("DB_PATH", "/litefs/gameserver.db")
+
+	// Ensure database directory exists
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		log.Printf("Warning: Failed to create database directory: %v", err)
+	}
+
+	// Initialize database
+	if err := db.Initialize(dbPath); err != nil {
+		log.Printf("Warning: Failed to initialize database: %v", err)
+	}
+
+	// Load existing players from database
+	dbPlayers, err := db.GetLeaderboard()
+	if err != nil {
+		log.Printf("Warning: Failed to load players from database: %v", err)
+	} else {
+		playersMu.Lock()
+		for _, p := range dbPlayers {
+			players[p.ID] = &Player{
+				ID:         p.ID,
+				Nickname:   p.Nickname,
+				PurePoints: p.PurePoints,
+				EvilPoints: p.EvilPoints,
+			}
+		}
+		playersMu.Unlock()
+		log.Printf("Loaded %d players from database", len(dbPlayers))
+	}
+
+	// Start periodic database sync
+	go syncPlayersToDatabase()
+
 	// Handle graceful shutdown
 	mux := http.NewServeMux()
+
+	// Metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
+
 	mux.HandleFunc("/dnsrequest", dnsRequestHandler)
 	mux.HandleFunc("/submitaction", submitActionHandler)
 	mux.HandleFunc("/register", registerHandler)

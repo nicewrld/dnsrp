@@ -1,4 +1,14 @@
 // dnsrp.go
+// yo this is where the dns magic happens
+// =====================================
+//
+// this plugin is the secret sauce that lets us:
+// - catch dns requests before they get answered
+// - ask our game what to do with them
+// - do chaotic things to the responses
+//
+// it's basically a dns request interceptor that
+// lets players choose their own adventure
 
 package dnsrp
 
@@ -18,14 +28,17 @@ import (
 	"github.com/miekg/dns"
 )
 
-// DNSRP is the plugin structure
+// the main plugin struct - keeps track of:
+// - where to send captured requests
+// - how to talk to the game server
+// - what to do next if we fail
 type DNSRP struct {
-	Next          plugin.Handler
-	GameServerURL string
-	Client        *http.Client
+	Next          plugin.Handler  // the next plugin to call if we tap out
+	GameServerURL string         // where our game server lives
+	Client        *http.Client   // for talking to the game server
 }
 
-// ServeDNS implements the plugin.Handler interface
+// this is where we intercept dns requests
 func (d DNSRP) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	question := r.Question[0]
 	log.Infof("dnsrp plugin invoked for query: %s", question.Name)

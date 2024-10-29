@@ -3,12 +3,9 @@ version: '3.8'
 services:
   coredns:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ./dnsrp
     ports:
       - "5983:5983/udp"
-    volumes:
-      - ./Corefile:/root/Corefile
     depends_on:
       - gameserver
     networks:
@@ -19,6 +16,8 @@ services:
       context: ./gameserver
     ports:
       - "8080:8080"
+    volumes:
+      - ./data:/litefs
     networks:
       - dnsgame-net
 
@@ -42,12 +41,12 @@ services:
       - coredns
     environment:
       NUM_PLAYERS: 50
-      MAX_WORKERS: 25
-      NUM_THREADS: 25
+      MAX_WORKERS: 50
+      NUM_THREADS: 50
       DNS_SERVER: coredns
       DNS_PORT: 5983
       WEB_INTERFACE_HOST: webinterface:8081
-      STARTUP_DELAY: 5
+      STARTUP_DELAY: 10
     networks:
       - dnsgame-net
 
