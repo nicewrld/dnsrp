@@ -26,7 +26,7 @@ services:
     build:
       context: ./webinterface
     ports:
-      - "8081:8081"
+      - "80:8081"
     depends_on:
       - gameserver
     networks:
