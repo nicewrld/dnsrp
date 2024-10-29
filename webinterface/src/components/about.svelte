@@ -16,14 +16,13 @@
             alignment score:
         </p>
         <ul class="list-disc pl-6 mb-4">
-            <li><strong>Correct:</strong> Respond with accurate DNS information</li>
-            <li><strong>Corrupt:</strong> Return intentionally incorrect data</li>
-            <li><strong>Delay:</strong> Introduce artificial latency</li>
-            <li><strong>NXDomain:</strong> Claim the domain doesn't exist</li>
+            <li><strong>correct:</strong> be normalcore</li>
+            <li><strong>corrupt:</strong> be evilcore (random ip)</li>
+            <li><strong>delay:</strong> be slowpilled</li>
+            <li><strong>NXDomain:</strong> be gaslight do lying</li>
         </ul>
         <p>
-            Your choices between honest and mischievous behavior will determine whether you become
-            known as a Pure or Evil DNS server. Choose wisely!
+            leaderboard tracks if you are an evilmaxxer or clearpilled
         </p>
     </div>
 
