@@ -50,6 +50,22 @@ services:
     networks:
       - dnsgame-net
 
+  loader:
+    build:
+      context: ./loader
+    depends_on:
+      - gameserver
+      - coredns
+    environment:
+      DNS_SERVER: coredns
+      DNS_PORT: 5983
+      METRICS_URL: http://gameserver:8080/metrics
+      TARGET_QUEUE_SIZE: 100
+      ADJUST_INTERVAL: 10s
+      CHECK_INTERVAL: 5s
+    networks:
+      - dnsgame-net
+
 networks:
   dnsgame-net:
     driver: bridge
