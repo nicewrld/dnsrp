@@ -40,4 +40,20 @@
             {/each}
         </tbody>
     </table>
+    
+    <div class="flex justify-center gap-4 mt-6">
+        <button 
+            class="px-4 py-2 bg-gray-800 text-white rounded-lg disabled:opacity-50"
+            on:click={previousPage}
+            disabled={currentPage === 1}>
+            Previous
+        </button>
+        <span class="py-2">Page {currentPage}</span>
+        <button 
+            class="px-4 py-2 bg-gray-800 text-white rounded-lg disabled:opacity-50"
+            on:click={nextPage}
+            disabled={!hasMore}>
+            Next
+        </button>
+    </div>
 </div>
