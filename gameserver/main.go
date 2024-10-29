@@ -427,7 +427,7 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// leaderboardHandler returns the current leaderboard
+// leaderboardHandler returns the current leaderboard with pagination
 func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 	type LeaderboardEntry struct {
 		PlayerID     string  `json:"player_id"`
@@ -436,6 +436,13 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 		EvilPoints   float64 `json:"evil_points"`
 		NetAlignment float64 `json:"net_alignment"`
 	}
+
+	// Parse pagination parameters
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	pageSize := 50 // Fixed page size of 50 items
 
 	playersMu.RLock()
 	defer playersMu.RUnlock()
@@ -456,8 +463,19 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 		return leaderboard[i].NetAlignment > leaderboard[j].NetAlignment
 	})
 
+	// Calculate pagination bounds
+	startIndex := (page - 1) * pageSize
+	endIndex := startIndex + pageSize
+	if startIndex >= len(leaderboard) {
+		startIndex = 0
+		endIndex = 0
+	} else if endIndex > len(leaderboard) {
+		endIndex = len(leaderboard)
+	}
+
+	// Return the paginated slice
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(leaderboard)
+	json.NewEncoder(w).Encode(leaderboard[startIndex:endIndex])
 }
 
 // generatePlayerID creates a unique PlayerID based on the current timestamp
