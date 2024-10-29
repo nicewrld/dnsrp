@@ -57,6 +57,9 @@
                 errorMessage = "";
                 submissionMessage = "";
                 selectedAction = "";
+
+
+
                 clearInterval(countdownInterval);
                 countdown = 0;
 
@@ -68,6 +71,7 @@
                 // No requests available - implement exponential backoff
                 errorMessage = "No DNS requests available.";
                 retryDelay = getRandomInt(1000, 5000); // 1-5 second delay
+
                 countdown = retryDelay;
                 startRetryCountdown();
             }
@@ -147,10 +151,12 @@
             );
             await getDNSRequest();
 
+
         } else {
             const errorText = await res.text();
             submissionMessage = `Failed to submit action: ${errorText}`;
         }
+
 
         isSubmitting = false;
     }
@@ -167,6 +173,7 @@
     <div class="max-w-2xl w-full p-6 bg-gray-800 rounded-lg shadow-lg text-white mx-auto">
     {#if dnsRequest}
         <div in:fly={{ y: 50, duration: 500 }} out:fade>
+
             <h1 class="text-3xl font-bold mb-6 text-center text-blue-400">
                 Handle DNS Request
             </h1>
@@ -183,6 +190,7 @@
                     <span class="font-bold text-blue-300">Class:</span>
                     {dnsRequest.class}
                 </p>
+
             </div>
 
             <form on:submit|preventDefault={submitAction} class="mt-6">
@@ -196,6 +204,7 @@
                             <label
                                 class="flex items-center bg-gray-700 p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-gray-600"
                             >
+
                                 <input
                                     type="radio"
                                     name="action"
@@ -214,6 +223,7 @@
                     disabled={!selectedAction || isSubmitting}
                 >
                     {isSubmitting ? "Submitting..." : "Submit"}
+
                 </button>
             </form>
 
@@ -222,6 +232,7 @@
                     in:fly={{ y: 20, duration: 300 }}
                     class="mt-4 text-center text-green-400 font-semibold"
                 >
+
                     {submissionMessage}
                 </div>
             {/if}
@@ -238,6 +249,7 @@
                         class="bg-blue-500 h-2.5 rounded-full"
                         style="width: {100 - (countdown / retryDelay) * 100}%"
                     ></div>
+
                 </div>
             {/if}
         </div>

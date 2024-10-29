@@ -1,6 +1,7 @@
 <script>
   import { fade } from 'svelte/transition';
   let showAbout = false;
+
   import Router from 'svelte-spa-router';
   import { link, location } from 'svelte-spa-router';
   import Play from './components/play.svelte';
@@ -9,12 +10,14 @@
   import About from './components/about.svelte';
   import { PlayIcon, TrophyIcon, InfoIcon } from 'lucide-svelte';
 
+
   const routes = {
     '/': Play,
     '/play': Play,
     '/leaderboard': Leaderboard,
     '/register': Register,
     '/about': About,
+
   };
 </script>
 
@@ -37,6 +40,7 @@
           <InfoIcon size={24} />
           <span class="sidebar-tab-text">About</span>
         </a>
+
       </div>
     </div>
   </nav>
