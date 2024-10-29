@@ -1,4 +1,4 @@
-// yo this is our database stuff
+// daterbase stuff
 // ===========================
 // we use sqlite cuz it's simple and just works
 // litefs makes sure we don't lose data when things crash
@@ -17,8 +17,8 @@ import (
 )
 
 var (
-	db   *sql.DB     // our connection to sqlite
-	once sync.Once   // makes sure we only set up once
+	db   *sql.DB   // our connection to sqlite
+	once sync.Once // makes sure we only set up once
 )
 
 // all the stuff we track about players
