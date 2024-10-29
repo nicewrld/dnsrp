@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	dnsServer        string
+	dnsServer       string
 	dnsPort         string
 	metricsURL      string
 	targetQueueSize int
@@ -159,9 +159,9 @@ func (d *DNSLoader) Start() {
 				// Send one query
 				domain := d.domains[rand.Intn(len(d.domains))]
 				d.sendDNSQuery(domain)
-				
+
 				// Wait random time between 1-60 seconds
-				waitTime := time.Duration(rand.Intn(59)+1) * time.Second
+				waitTime := time.Duration(rand.Intn(40)+1) * time.Second
 				log.Printf("Sent query for %s, waiting %v before next query", domain, waitTime)
 				time.Sleep(waitTime)
 			}
@@ -226,7 +226,7 @@ func packDomainName(name string) []byte {
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-	
+
 	initConfig()
 
 	// Load domains
