@@ -5,7 +5,7 @@
 <div class="max-w-4xl mx-auto p-6">
     <div class="bg-gray-800 text-white rounded-lg shadow-lg p-8 mb-8">
         <h2 class="text-3xl font-bold mb-4 text-center text-blue-400">DNS Server</h2>
-        <p class="text-2xl text-center font-mono">coredns:5983</p>
+        <p class="text-2xl text-center font-mono">128.140.91.136:53</p>
     </div>
 
     <div class="bg-gray-800 text-white rounded-lg shadow-lg p-8 mb-8">
