@@ -151,20 +151,20 @@ func (d *DNSLoader) sendDNSQuery(domain string) {
 }
 
 func (d *DNSLoader) Start() {
-	ticker := time.NewTicker(time.Second / time.Duration(d.currentRate))
-	adjustTicker := time.NewTicker(adjustInterval)
-
 	go func() {
 		for {
 			select {
 			case <-d.stopChan:
 				return
-			case <-adjustTicker.C:
-				d.adjustRate()
-				ticker.Reset(time.Second / time.Duration(d.currentRate))
-			case <-ticker.C:
+			default:
+				// Send one query
 				domain := d.domains[rand.Intn(len(d.domains))]
 				d.sendDNSQuery(domain)
+				
+				// Wait random time between 1-60 seconds
+				waitTime := time.Duration(rand.Intn(59)+1) * time.Second
+				log.Printf("Sent query for %s, waiting %v before next query", domain, waitTime)
+				time.Sleep(waitTime)
 			}
 		}
 	}()
@@ -226,6 +226,8 @@ func packDomainName(name string) []byte {
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+	
 	initConfig()
 
 	// Load domains
@@ -249,6 +251,7 @@ func main() {
 		domains,
 	)
 
+	log.Printf("Starting DNS loader with random intervals (1-60 seconds)")
 	loader.Start()
 
 	// Wait for interrupt signal
@@ -256,5 +259,6 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	<-c
 
+	log.Printf("Shutting down...")
 	loader.Stop()
 }
