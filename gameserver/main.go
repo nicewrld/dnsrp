@@ -459,9 +459,11 @@ func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Sort the leaderboard by NetAlignment in descending order
+	// Sort the leaderboard by total points in descending order
 	sort.Slice(leaderboard, func(i, j int) bool {
-		return leaderboard[i].NetAlignment > leaderboard[j].NetAlignment
+		totalI := leaderboard[i].PurePoints + leaderboard[i].EvilPoints
+		totalJ := leaderboard[j].PurePoints + leaderboard[j].EvilPoints
+		return totalI > totalJ
 	})
 
 	// Calculate pagination bounds

@@ -143,7 +143,7 @@ func GetLeaderboard() ([]Player, error) {
 	rows, err := db.Query(`
 		SELECT id, nickname, pure_points, evil_points, last_request_id, created_at, updated_at
 		FROM players
-		ORDER BY (pure_points - evil_points) DESC
+		ORDER BY (pure_points + evil_points) DESC
 	`)
 	if err != nil {
 		return nil, err
