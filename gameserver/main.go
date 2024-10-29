@@ -378,7 +378,11 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 	playersMu.RUnlock()
 	if assignedRequestID != actionReq.RequestID {
 		log.Printf("Player %s assigned request %s does not match submitted request %s", actionReq.PlayerID, assignedRequestID, actionReq.RequestID)
-		http.Error(w, "Invalid request_id for this player", http.StatusBadRequest)
+		if assignedRequestID == "" {
+			http.Error(w, "This request was already handled", http.StatusBadRequest)
+		} else {
+			http.Error(w, "Invalid request_id for this player", http.StatusBadRequest)
+		}
 		return
 	}
 
