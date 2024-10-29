@@ -1,18 +1,17 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 )
 
