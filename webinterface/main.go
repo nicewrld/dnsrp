@@ -127,7 +127,14 @@ func submitHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func leaderboardHandler(w http.ResponseWriter, r *http.Request) {
-	resp, err := client.Get("http://gameserver:8080/leaderboard")
+	// Forward the page parameter from the frontend to the gameserver
+	page := r.URL.Query().Get("page")
+	url := "http://gameserver:8080/leaderboard"
+	if page != "" {
+		url += "?page=" + page
+	}
+	
+	resp, err := client.Get(url)
 	if err != nil {
 		log.Printf("Failed to get leaderboard: %v", err)
 		http.Error(w, "Failed to get leaderboard.", http.StatusInternalServerError)
