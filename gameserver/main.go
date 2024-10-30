@@ -32,7 +32,7 @@ const (
 	MaxDNSQueueSize = 10000
 
 	// MinimumRemainingTime defines the minimum time a DNS request must have before timing out to be assigned to a player.
-	MinimumRemainingTime = 16 * time.Second
+	MinimumRemainingTime = 18 * time.Second
 )
 
 //////////////////////////////////////////
