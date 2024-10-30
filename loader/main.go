@@ -217,7 +217,7 @@ func main() {
 	go func() {
 		for {
 			// Wait for a random duration between 1 and 10 seconds
-			sleepDuration := time.Duration(rand.Intn(2)+1) * time.Second
+			sleepDuration := time.Duration(1) * time.Second
 			time.Sleep(sleepDuration)
 
 			// Select a random domain to query
