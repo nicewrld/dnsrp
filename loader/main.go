@@ -7,14 +7,10 @@ import (
 	"log"
 	"math/rand"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/prometheus/common/expfmt"
 )
 
 //////////////////////////////////////////
@@ -34,18 +30,6 @@ const (
 	// defaultDNSPort is the default DNS server port.
 	defaultDNSPort = "5983"
 
-	// defaultMetricsURL is the default URL for Prometheus metrics.
-	defaultMetricsURL = "http://gameserver:8080/metrics"
-
-	// defaultTargetQueueSize is the default target size for the DNS request queue.
-	defaultTargetQueueSize = 100
-
-	// defaultAdjustInterval is the default interval for adjusting the DNS query rate.
-	defaultAdjustInterval = "10s"
-
-	// defaultCheckInterval is the default interval for checking DNS queue metrics.
-	defaultCheckInterval = "5s"
-
 	// domainsFile is the filename containing the list of domains to query.
 	domainsFile = "domains.txt"
 )
@@ -56,13 +40,9 @@ const (
 
 var (
 	// Configuration variables loaded from environment or defaults.
-	dnsServer       string
-	dnsPort         string
-	metricsURL      string
-	targetQueueSize int
-	domains         []string
-	adjustInterval  time.Duration
-	checkInterval   time.Duration
+	dnsServer string
+	dnsPort   string
+	domains   []string
 )
 
 //////////////////////////////////////////
@@ -83,28 +63,6 @@ func getEnv(key, defaultValue string) string {
 func initConfig() {
 	dnsServer = getEnv("DNS_SERVER", defaultDNSServer)
 	dnsPort = getEnv("DNS_PORT", defaultDNSPort)
-	metricsURL = getEnv("METRICS_URL", defaultMetricsURL)
-
-	// Parse target queue size, defaulting to 100 if parsing fails.
-	if size, err := strconv.Atoi(getEnv("TARGET_QUEUE_SIZE", strconv.Itoa(defaultTargetQueueSize))); err == nil {
-		targetQueueSize = size
-	} else {
-		targetQueueSize = defaultTargetQueueSize
-	}
-
-	// Parse adjust interval duration, defaulting to 10 seconds if parsing fails.
-	if interval, err := time.ParseDuration(getEnv("ADJUST_INTERVAL", defaultAdjustInterval)); err == nil {
-		adjustInterval = interval
-	} else {
-		adjustInterval = 10 * time.Second
-	}
-
-	// Parse check interval duration, defaulting to 5 seconds if parsing fails.
-	if interval, err := time.ParseDuration(getEnv("CHECK_INTERVAL", defaultCheckInterval)); err == nil {
-		checkInterval = interval
-	} else {
-		checkInterval = 5 * time.Second
-	}
 }
 
 // loadDomains reads a list of domains from a specified file.
@@ -189,88 +147,12 @@ func packDomainName(name string) []byte {
 }
 
 //////////////////////////////////////////
-// DNSLoader Structure and Methods
+// DNS Query Function
 //////////////////////////////////////////
-
-// DNSLoader is responsible for generating and sending DNS queries to the DNS server.
-// It adjusts the query rate based on the DNS server's queue metrics to maintain optimal performance.
-type DNSLoader struct {
-	currentRate     int           // Current DNS query rate (queries per second)
-	dnsServerIP     string        // IP address of the DNS server
-	dnsPort         string        // Port number of the DNS server
-	metricsURL      string        // URL to fetch Prometheus metrics
-	targetQueueSize int           // Desired size of the DNS request queue
-	domains         []string      // List of domains to query
-	stopChan        chan struct{} // Channel to signal stopping of the DNSLoader
-}
-
-// NewDNSLoader creates and initializes a new DNSLoader instance with the provided configuration.
-// It sets the initial query rate and prepares the stop channel for graceful shutdown.
-func NewDNSLoader(dnsServerIP, dnsPort, metricsURL string, targetQueueSize int, domains []string) *DNSLoader {
-	return &DNSLoader{
-		currentRate:     1, // Start with 1 query per second
-		dnsServerIP:     dnsServerIP,
-		dnsPort:         dnsPort,
-		metricsURL:      metricsURL,
-		targetQueueSize: targetQueueSize,
-		domains:         domains,
-		stopChan:        make(chan struct{}),
-	}
-}
-
-// getQueueMetrics retrieves the current DNS queue length from the Prometheus metrics endpoint.
-// It parses the Prometheus metrics to extract the 'dns_queue_length' gauge value.
-func (d *DNSLoader) getQueueMetrics() (float64, error) {
-	resp, err := http.Get(d.metricsURL)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	var parser expfmt.TextParser
-	metrics, err := parser.TextToMetricFamilies(resp.Body)
-	if err != nil {
-		return 0, err
-	}
-
-	if metric, ok := metrics["dns_queue_length"]; ok {
-		if len(metric.Metric) > 0 && metric.Metric[0].Gauge != nil {
-			return metric.Metric[0].Gauge.GetValue(), nil
-		}
-	}
-	return 0, fmt.Errorf("queue length metric not found")
-}
-
-// adjustRate modifies the DNS query rate based on the current queue length.
-// If the queue is below 80% of the target, it increases the rate by 20%.
-// If the queue exceeds 120% of the target, it decreases the rate by 20%.
-// This dynamic adjustment helps in maintaining optimal load on the DNS server.
-func (d *DNSLoader) adjustRate() {
-	queueLength, err := d.getQueueMetrics()
-	if err != nil {
-		log.Printf("Error getting metrics: %v", err)
-		return
-	}
-
-	// Adjust rate based on queue length
-	if queueLength < float64(d.targetQueueSize)*0.8 {
-		d.currentRate = int(float64(d.currentRate) * 1.2)
-	} else if queueLength > float64(d.targetQueueSize)*1.2 {
-		d.currentRate = int(float64(d.currentRate) * 0.8)
-	}
-
-	// Ensure the rate does not fall below 1 query per second
-	if d.currentRate < 1 {
-		d.currentRate = 1
-	}
-
-	log.Printf("Current queue length: %.2f, Target: %d, Adjusted rate: %d/sec",
-		queueLength, d.targetQueueSize, d.currentRate)
-}
 
 // sendDNSQuery constructs and sends a DNS query for the specified domain to the DNS server.
 // It establishes a UDP connection, packs the DNS message, and sends it over the network.
-func (d *DNSLoader) sendDNSQuery(domain string) {
+func sendDNSQuery(dnsServerIP string, dnsPort string, domain string) {
 	msg := new(dnsMessage)
 	msg.id = uint16(rand.Intn(65535)) // Random transaction ID
 	msg.recursionDesired = true
@@ -282,9 +164,9 @@ func (d *DNSLoader) sendDNSQuery(domain string) {
 		},
 	}
 
-	conn, err := net.Dial("udp", fmt.Sprintf("%s:%s", d.dnsServerIP, d.dnsPort))
+	conn, err := net.Dial("udp", fmt.Sprintf("%s:%s", dnsServerIP, dnsPort))
 	if err != nil {
-		log.Printf("Failed to connect to DNS server %s:%s - %v", d.dnsServerIP, d.dnsPort, err)
+		log.Printf("Failed to connect to DNS server %s:%s - %v", dnsServerIP, dnsPort, err)
 		return
 	}
 	defer conn.Close()
@@ -298,52 +180,13 @@ func (d *DNSLoader) sendDNSQuery(domain string) {
 	log.Printf("Sent DNS query for domain: %s", domain)
 }
 
-// Start initiates the DNSLoader's query sending process.
-// It runs in a separate goroutine, continuously sending DNS queries at the current rate
-// and adjusting the rate at specified intervals based on queue metrics.
-func (d *DNSLoader) Start() {
-	// Ticker for adjusting the query rate
-	adjustTicker := time.NewTicker(adjustInterval)
-	// Ticker for sending DNS queries based on the current rate
-	queryTicker := time.NewTicker(time.Duration(1e9 / d.currentRate)) // Initial rate
-
-	go func() {
-		defer adjustTicker.Stop()
-		defer queryTicker.Stop()
-
-		for {
-			select {
-			case <-d.stopChan:
-				log.Println("DNSLoader received stop signal. Exiting query loop.")
-				return
-			case <-adjustTicker.C:
-				d.adjustRate()
-				// Reset the query ticker based on the new rate
-				queryTicker.Stop()
-				queryTicker = time.NewTicker(time.Duration(1e9 / d.currentRate))
-			case <-queryTicker.C:
-				// Select a random domain to query
-				domain := d.domains[rand.Intn(len(d.domains))]
-				d.sendDNSQuery(domain)
-			}
-		}
-	}()
-}
-
-// Stop signals the DNSLoader to cease sending DNS queries.
-// It closes the stop channel, which gracefully terminates the query loop.
-func (d *DNSLoader) Stop() {
-	close(d.stopChan)
-	log.Println("DNSLoader has been stopped.")
-}
-
 //////////////////////////////////////////
 // Main Function
 //////////////////////////////////////////
 
 // main is the entry point of the DNSLoader application.
 // It initializes configurations, loads domains, resolves DNS server IP,
-// creates and starts the DNSLoader, and handles graceful shutdown on interrupt signals.
+// and sends DNS queries at random intervals between 1 and 10 seconds.
 func main() {
 	// Seed the random number generator for DNS query randomness.
 	rand.Seed(time.Now().UnixNano())
@@ -366,26 +209,25 @@ func main() {
 	}
 	log.Printf("Resolved DNS server %s to IP %s", dnsServer, dnsServerIP.String())
 
-	// Create a new DNSLoader instance with the loaded configuration.
-	loader := NewDNSLoader(
-		dnsServerIP.String(),
-		dnsPort,
-		metricsURL,
-		targetQueueSize,
-		domains,
-	)
-
-	log.Printf("Starting DNSLoader with initial rate: %d queries/sec", loader.currentRate)
-	loader.Start()
-
 	// Channel to listen for interrupt signals for graceful shutdown.
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 
+	// Run the loop in a separate goroutine
+	go func() {
+		for {
+			// Wait for a random duration between 1 and 10 seconds
+			sleepDuration := time.Duration(rand.Intn(10)+1) * time.Second
+			time.Sleep(sleepDuration)
+
+			// Select a random domain to query
+			domain := domains[rand.Intn(len(domains))]
+			sendDNSQuery(dnsServerIP.String(), dnsPort, domain)
+		}
+	}()
+
 	// Block until an interrupt signal is received.
 	<-c
 
-	log.Printf("Interrupt signal received. Shutting down DNSLoader...")
-	loader.Stop()
-	log.Printf("DNSLoader has been successfully shut down.")
+	log.Printf("Interrupt signal received. Shutting down...")
 }
