@@ -2,7 +2,7 @@
 // ===========================
 // we use sqlite cuz it's simple and just works
 // litefs makes sure we don't lose data when things crash
-
+// gameserver/db/db.go
 package db
 
 import (

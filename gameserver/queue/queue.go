@@ -1,5 +1,6 @@
 // job queue for handling database operations
 // keeps things smooth when we're getting hammered
+// gameserver/queue/queue.go
 
 package queue
 
