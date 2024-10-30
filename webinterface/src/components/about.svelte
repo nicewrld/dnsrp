@@ -45,6 +45,12 @@
                 <MailIcon size={24} />
                 <span>h@hhh.hn</span>
             </a>
+            <p
+                class="flex items-center gap-3 p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors"
+            >
+                <UserRound size={24} />
+                <span>@zsh on discord</span>
+            </p>
         </div>
     </div>
 </div>
