@@ -1,5 +1,5 @@
 <script>
-    import { TwitterIcon, MailIcon } from 'lucide-svelte';
+    import { MailIcon, Github } from 'lucide-svelte';
 </script>
 
 <div class="max-w-4xl mx-auto p-6">
@@ -11,8 +11,7 @@
     <div class="bg-gray-800 text-white rounded-lg shadow-lg p-8 mb-8">
         <h2 class="text-3xl font-bold mb-4 text-blue-400">About the Game</h2>
         <p class="mb-4">
-            DNS Roleplay is an interactive game where players take on the role of DNS servers,
-            making decisions about how to handle DNS requests. Each action you take affects your
+            act like a dns server but you are a person
             alignment score:
         </p>
         <ul class="list-disc pl-6 mb-4">
@@ -29,12 +28,12 @@
     <div class="bg-gray-800 text-white rounded-lg shadow-lg p-8">
         <h2 class="text-3xl font-bold mb-4 text-blue-400">Contact</h2>
         <div class="flex flex-col gap-4">
-            <a href="https://twitter.com/spuhghetti" 
+            <a href="https://github.com/nicewrld" 
                target="_blank" 
                rel="noopener noreferrer" 
                class="flex items-center gap-3 p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
-                <TwitterIcon size={24} />
-                <span>@spuhghetti</span>
+                <Github size={24} />
+                <span>@nicewrld</span>
             </a>
             <a href="mailto:h@hhh.hn" 
                class="flex items-center gap-3 p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
