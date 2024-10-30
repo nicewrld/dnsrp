@@ -1,21 +1,5 @@
+<!-- webinterface/src/components/play.svelte -->
 <script>
-    /*
-     *  DNS ROLEPLAY GAME - PLAY COMPONENT
-     *  ─────────────────────────────────
-     *  This component implements the core gameplay loop where players choose how
-     *  to respond to DNS requests. It's built as a reactive state machine with
-     *  the following states:
-     *
-     *    1. LOADING   - Fetching next DNS request from server
-     *    2. READY     - Displaying request and waiting for player action
-     *    3. ERROR     - No requests available, counting down to retry
-     *    4. SUBMITTING - Sending player's chosen action to server
-     *
-     *  The game flow is deliberately throttled with random delays to prevent
-     *  players from overwhelming the DNS server. This creates natural pauses
-     *  that make the game feel more thoughtful and strategic.
-     */
-
     import { onMount } from "svelte";
     import { fade, fly } from "svelte/transition"; // Smooth UI transitions
     import { push } from "svelte-spa-router";      // Client-side navigation
@@ -25,23 +9,21 @@
     let selectedAction = "";      // Player's chosen action (correct/corrupt/etc)
     let errorMessage = "";        // Display message when requests unavailable  
     let submissionMessage = "";   // Feedback after submitting action
-    
+
     // Retry mechanism state
     let countdown = 0;            // Milliseconds until next retry
-    let retryDelay = 0;          // Total delay for current retry attempt
+    let retryDelay = 0;           // Total delay for current retry attempt
     let countdownInterval;        // Timer handle for countdown animation
     let isSubmitting = false;     // Prevents double-submissions
 
+    // Timer for DNS request expiration
+    let timeLeft = 15000;         // Time left in milliseconds (15 seconds)
+    let timerInterval;            // Interval handle for the timer
+    let timeExpired = false;      // Indicates if time has expired
+
     /**
      * Fetches the next DNS request for the player to handle.
-     *
-     * The server uses a token bucket rate limiter, so requests may not always
-     * be available. When this happens, we back off with a random delay between
-     * 1-5 seconds to prevent thundering herd problems.
-     *
-     * If the player isn't logged in (401), we redirect them to registration.
-     * This creates a natural progression where new players must register before
-     * they can start manipulating DNS responses.
+     * Starts a 15-second timer upon receiving a request.
      */
     async function getDNSRequest() {
         try {
@@ -58,10 +40,12 @@
                 submissionMessage = "";
                 selectedAction = "";
 
-
-
                 clearInterval(countdownInterval);
                 countdown = 0;
+
+                // Start the timer
+                timeLeft = 15000; // 15 seconds
+                startTimer();
 
             } else if (response.status === 401) {
                 // Not logged in - send them to registration
@@ -87,11 +71,28 @@
     }
 
     /**
+     * Starts the countdown timer for the DNS request expiration.
+     * Updates the `timeLeft` variable every 100ms.
+     */
+    function startTimer() {
+        clearInterval(timerInterval);
+        timeExpired = false;
+        timerInterval = setInterval(() => {
+            timeLeft -= 100; // Decrease every 100ms
+            if (timeLeft <= 0) {
+                clearInterval(timerInterval);
+                timeLeft = 0;
+                timeExpired = true;
+                if (!isSubmitting) {
+                    submitAction();
+                }
+            }
+        }, 100);
+    }
+
+    /**
      * Implements a smooth countdown timer with progress bar animation.
      * Updates every 10ms for fluid visual feedback.
-     * 
-     * The progress bar helps players understand when the next request will
-     * be available, making the waiting period feel more engaging.
      */
     function startRetryCountdown() {
         clearInterval(countdownInterval);
@@ -106,8 +107,7 @@
 
     /**
      * Returns a random integer between min and max (inclusive).
-     * Used for jittering retry delays to prevent synchronized retries
-     * from multiple clients hitting the server at once.
+     * Used for jittering retry delays.
      */
     function getRandomInt(min, max) {
         return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -115,22 +115,17 @@
 
     /**
      * Submits the player's chosen action for the current DNS request.
-     * 
-     * Actions can be:
-     * - correct: Return the true DNS record
-     * - corrupt: Return a random incorrect IP
-     * - delay: Add artificial latency
-     * - nxdomain: Claim the domain doesn't exist
-     *
-     * We add a random delay after successful submission to:
-     * 1. Give players time to see the success message
-     * 2. Prevent rapid-fire submissions
-     * 3. Make the game feel more deliberate and impactful
+     * If the timer expires, defaults to 'correct' action.
      */
     async function submitAction() {
-        // Prevent double-submissions during server roundtrip
         if (isSubmitting) return;
         isSubmitting = true;
+        clearInterval(timerInterval);
+
+        if (!selectedAction) {
+            // If no action selected, default to 'correct'
+            selectedAction = 'correct';
+        }
 
         const res = await fetch("/api/submit", {
             method: "POST",
@@ -151,12 +146,10 @@
             );
             await getDNSRequest();
 
-
         } else {
             const errorText = await res.text();
             submissionMessage = `Failed to submit action: ${errorText}`;
         }
-
 
         isSubmitting = false;
     }
@@ -165,6 +158,7 @@
         getDNSRequest();
         return () => {
             clearInterval(countdownInterval);
+            clearInterval(timerInterval);
         };
     });
 </script>
@@ -190,7 +184,6 @@
                     <span class="font-bold text-blue-300">Class:</span>
                     {dnsRequest.class}
                 </p>
-
             </div>
 
             <form on:submit|preventDefault={submitAction} class="mt-6">
@@ -220,12 +213,27 @@
                 <button
                     type="submit"
                     class="mt-6 w-full bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={!selectedAction || isSubmitting}
+                    disabled={!selectedAction || isSubmitting || timeExpired}
                 >
                     {isSubmitting ? "Submitting..." : "Submit"}
 
                 </button>
             </form>
+
+            <!-- Countdown Timer and Progress Bar -->
+            {#if timeLeft > 0}
+                <div class="mt-4">
+                    <p class="text-sm text-gray-400">
+                        Time remaining: {(timeLeft / 1000).toFixed(1)} seconds
+                    </p>
+                    <div class="w-full bg-gray-700 rounded-full h-2.5 mt-2">
+                        <div
+                            class="bg-red-500 h-2.5 rounded-full"
+                            style="width: {(timeLeft / 15000) * 100}%"
+                        ></div>
+                    </div>
+                </div>
+            {/if}
 
             {#if submissionMessage}
                 <div
