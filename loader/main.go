@@ -160,7 +160,7 @@ func (d *DNSLoader) Start() {
 				domain := d.domains[rand.Intn(len(d.domains))]
 				d.sendDNSQuery(domain)
 
-				// Wait random time between 1-60 seconds
+				// Wait random time between 1-40 seconds
 				waitTime := time.Duration(rand.Intn(40)+1) * time.Second
 				log.Printf("Sent query for %s, waiting %v before next query", domain, waitTime)
 				time.Sleep(waitTime)
