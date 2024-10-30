@@ -307,9 +307,7 @@ func submitActionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate the assigned request.
-	playersMu.RLock()
 	assignedRequestID := player.AssignedRequestID
-	playersMu.RUnlock()
 	if assignedRequestID != actionReq.RequestID {
 		log.Printf("Player %s assigned request %s does not match submitted request %s", actionReq.PlayerID, assignedRequestID, actionReq.RequestID)
 		if assignedRequestID == "" {
@@ -556,38 +554,22 @@ func clearPlayerAssignment(playerID string) {
 func cleanupExpiredRequests() {
 	for {
 		time.Sleep(1 * time.Minute)
-		dnsRequestsMu.Lock()
-		pendingRequestsMu.Lock()
 		now := time.Now()
 		var expiredRequests []string
 
+		// Collect expired request IDs.
+		dnsRequestsMu.RLock()
 		for reqID, dnsReq := range dnsRequests {
 			if now.Sub(dnsReq.Timestamp) > 5*time.Minute {
-				delete(dnsRequests, reqID)
-				removePendingRequest(reqID)
 				expiredRequests = append(expiredRequests, reqID)
-				log.Printf("[RequestID: %s] Expired DNS request cleaned up after 5 minutes", reqID)
-
-				// Clear the player's assigned request if it matches this requestID.
-				playersMu.Lock()
-				for _, player := range players {
-					if player.AssignedRequestID == reqID {
-						player.AssignedRequestID = ""
-						log.Printf("Cleared AssignedRequestID for player %s because request %s expired", player.ID, reqID)
-						break
-					}
-				}
-				playersMu.Unlock()
 			}
 		}
+		dnsRequestsMu.RUnlock()
 
-		// Update the pendingDNSRequests metric.
-		pendingDNSRequests.Set(float64(len(pendingRequests)))
-		pendingRequestsMu.Unlock()
-		dnsRequestsMu.Unlock()
-
-		if len(expiredRequests) > 0 {
-			log.Printf("Cleaned up %d expired DNS requests", len(expiredRequests))
+		// Clean up expired requests.
+		for _, reqID := range expiredRequests {
+			cleanupDNSRequest(reqID, "expired")
+			log.Printf("[RequestID: %s] Expired DNS request cleaned up after 5 minutes", reqID)
 		}
 	}
 }
@@ -598,7 +580,7 @@ func syncPlayersToDatabase() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		playersMu.RLock()
+		playersMu.Lock()
 		for _, player := range players {
 			if player.PureDelta != 0 || player.EvilDelta != 0 {
 				if err := db.AddPlayerPoints(player.ID, player.PureDelta, player.EvilDelta); err != nil {
@@ -610,7 +592,7 @@ func syncPlayersToDatabase() {
 				}
 			}
 		}
-		playersMu.RUnlock()
+		playersMu.Unlock()
 		log.Printf("Synced player deltas to database")
 	}
 }
@@ -648,6 +630,7 @@ func main() {
 				EvilPoints: p.EvilPoints,
 			}
 		}
+		playerCount.Set(float64(len(players)))
 		playersMu.Unlock()
 		log.Printf("Loaded %d players from database", len(dbPlayers))
 	}
